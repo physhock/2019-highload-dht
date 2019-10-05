@@ -30,7 +30,7 @@ public class ServiceImpl extends HttpServer implements Service {
     @Path("/v0/status")
     @RequestMethod(Request.METHOD_GET)
     public Response getStatus(Request request) {
-        return new Response(Response.OK, Response.EMPTY);
+        return new Response(Response.OK, "I am alive!\n".getBytes());
     }
 
     @Path("/v0/entity")
