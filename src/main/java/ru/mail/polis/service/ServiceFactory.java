@@ -16,11 +16,11 @@
 
 package ru.mail.polis.service;
 
-import java.io.IOException;
-
 import org.jetbrains.annotations.NotNull;
-
 import ru.mail.polis.dao.DAO;
+import ru.mail.polis.service.physhock.ServiceImpl;
+
+import java.io.IOException;
 
 /**
  * Constructs {@link Service} instances.
@@ -37,8 +37,8 @@ public final class ServiceFactory {
     /**
      * Construct a storage instance.
      *
-     * @param port     port to bind HTTP server to
-     * @param dao      DAO to store the data
+     * @param port port to bind HTTP server to
+     * @param dao  DAO to store the data
      * @return a storage instance
      */
     @NotNull
@@ -53,6 +53,6 @@ public final class ServiceFactory {
             throw new IllegalArgumentException("Port out of range");
         }
 
-        throw new IllegalStateException();
+        return new ServiceImpl(port, dao);
     }
 }
