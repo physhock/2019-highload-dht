@@ -36,7 +36,6 @@ public class ServiceImpl extends HttpServer implements Service {
     @Path("/v0/entity")
     @RequestMethod(Request.METHOD_GET)
     public Response getData(Request request, @Param("id") String id) {
-
         try {
             ByteBuffer result = dao.get(ByteBuffer.wrap(id.getBytes(Charsets.UTF_8)));
             ByteBuffer duplicate = result.duplicate();
