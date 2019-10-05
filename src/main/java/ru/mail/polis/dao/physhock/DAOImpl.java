@@ -20,18 +20,14 @@ public class DAOImpl implements DAO {
     private final RocksDB rocksDB;
 
     public DAOImpl(File path) throws IOException {
-        rocksDB = createDB(path);
+        this.rocksDB = createDB(path);
     }
 
     private RocksDB createDB(File path) throws IOException {
         RocksDB.loadLibrary();
-        // the Options class contains a set of configurable DB options
-        // that determines the behaviour of the database.
-        try (final Options options = new Options().setCreateIfMissing(true)) {
-            // a factory method that returns a RocksDB instance
-            try (final RocksDB db = RocksDB.open(options, path.getPath())) {
-                return db;
-            }
+        try {
+            final Options options = new Options().setCreateIfMissing(true);
+            return RocksDB.open(options, path.getAbsolutePath());
         } catch (RocksDBException e) {
             throw new IOException("Cannot create DB");
         }
@@ -68,7 +64,7 @@ public class DAOImpl implements DAO {
     @Override
     public ByteBuffer get(@NotNull ByteBuffer key) throws IOException, NoSuchElementException {
         try {
-            return ByteBuffer.wrap(Optional.of(rocksDB.get(key.array())).orElseThrow(NoSuchElementException::new));
+            return ByteBuffer.wrap(Optional.ofNullable(rocksDB.get(key.array())).orElseThrow());
         } catch (RocksDBException e) {
             throw new IOException("RocksDB troubles", e);
         }
