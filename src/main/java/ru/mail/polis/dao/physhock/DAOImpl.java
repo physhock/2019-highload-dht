@@ -1,10 +1,8 @@
 package ru.mail.polis.dao.physhock;
 
 import org.jetbrains.annotations.NotNull;
-import org.rocksdb.Options;
-import org.rocksdb.RocksDB;
-import org.rocksdb.RocksDBException;
-import org.rocksdb.RocksIterator;
+import org.rocksdb.*;
+import org.rocksdb.util.BytewiseComparator;
 import ru.mail.polis.Record;
 import ru.mail.polis.dao.DAO;
 
@@ -26,7 +24,9 @@ public class DAOImpl implements DAO {
     private RocksDB createDB(File path) throws IOException {
         RocksDB.loadLibrary();
         try {
-            final Options options = new Options().setCreateIfMissing(true);
+            final Options options = new Options()
+                    .setCreateIfMissing(true)
+                    .setComparator(new BytewiseComparator(new ComparatorOptions()));
             return RocksDB.open(options, path.getAbsolutePath());
         } catch (RocksDBException e) {
             throw new IOException("Cannot create DB");
@@ -49,8 +49,7 @@ public class DAOImpl implements DAO {
             @Override
             public Record next() {
                 if (!hasNext())
-                    throw new NoSuchElementException();
-
+                    throw new NoSuchElementException("Next on empty iterator");
                 ByteBuffer key = ByteBuffer.wrap(iterator.key());
                 ByteBuffer value = ByteBuffer.wrap(iterator.value());
                 Record record = Record.of(key, value);
@@ -85,6 +84,15 @@ public class DAOImpl implements DAO {
             rocksDB.delete(key.array());
         } catch (RocksDBException e) {
             throw new IOException("RocksDB troubles", e);
+        }
+    }
+
+    @Override
+    public void compact() throws IOException {
+        try {
+            rocksDB.compactRange();
+        } catch (RocksDBException exception) {
+            throw new IOException("Error while compact", exception);
         }
     }
 
