@@ -63,7 +63,7 @@ public class DAOImpl implements DAO {
     @Override
     public ByteBuffer get(@NotNull ByteBuffer key) throws IOException, NoSuchElementException {
         try {
-            return ByteBuffer.wrap(Optional.ofNullable(rocksDB.get(key.array())).orElseThrow());
+            return ByteBuffer.wrap(Optional.ofNullable(rocksDB.get(key.array())).orElseThrow(NoSuchElementExceptionLite::new));
         } catch (RocksDBException e) {
             throw new IOException("RocksDB troubles", e);
         }

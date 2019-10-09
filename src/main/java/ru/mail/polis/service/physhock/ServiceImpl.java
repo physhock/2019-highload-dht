@@ -4,6 +4,7 @@ import com.google.common.base.Charsets;
 import one.nio.http.*;
 import one.nio.server.AcceptorConfig;
 import ru.mail.polis.dao.DAO;
+import ru.mail.polis.dao.physhock.NoSuchElementExceptionLite;
 import ru.mail.polis.service.Service;
 
 import java.io.IOException;
@@ -45,7 +46,7 @@ public class ServiceImpl extends HttpServer implements Service {
             byte[] body = new byte[duplicate.remaining()];
             duplicate.get(body);
             return new Response(Response.OK, body);
-        } catch (NoSuchElementException e) {
+        } catch (NoSuchElementExceptionLite e) {
             return new Response(Response.NOT_FOUND, Response.EMPTY);
         } catch (IOException e) {
             return new Response(Response.INTERNAL_ERROR, Response.EMPTY);
