@@ -20,31 +20,44 @@ public class ServiceImpl extends HttpServer implements Service {
     private final ExecutorService reader;
     private final ExecutorService writer;
 
-    public ServiceImpl(int port, DAO dao) throws IOException {
+    public ServiceImpl(final int port, final DAO dao) throws IOException {
         super(getConfig(port), dao);
         this.dao = dao;
         this.reader = Executors.newFixedThreadPool(1);
         this.writer = Executors.newFixedThreadPool(4);
     }
 
-    private static HttpServerConfig getConfig(int port) {
-        HttpServerConfig config = new HttpServerConfig();
-        AcceptorConfig acceptorConfig = new AcceptorConfig();
+    private static HttpServerConfig getConfig(final int port) {
+        final HttpServerConfig config = new HttpServerConfig();
+        final AcceptorConfig acceptorConfig = new AcceptorConfig();
         acceptorConfig.port = port;
         config.acceptors = new AcceptorConfig[]{acceptorConfig};
         return config;
     }
 
+    /**
+     * Method returns current server status.
+     *
+     * @param request http request
+     * @return current status
+     */
     @Path("/v0/status")
     @RequestMethod(Request.METHOD_GET)
-    public Response getStatus(Request request) {
-        return request.getParameters().equals(Collections.EMPTY_LIST) ?
-                new Response(Response.OK, "I am alive!\n".getBytes()) : new Response(Response.BAD_REQUEST, Response.EMPTY);
+    public Response getStatus(final Request request) {
+        return request.getParameters().equals(Collections.EMPTY_LIST)
+                ? new Response(Response.OK, "I am alive!\n".getBytes())
+                : new Response(Response.BAD_REQUEST, Response.EMPTY);
     }
 
+    /**
+     * Method returns data if exists.
+     *
+     * @param id key value
+     * @return data
+     */
     @Path("/v0/entity")
     @RequestMethod(Request.METHOD_GET)
-    public Response getData(@Param(value = "id", required = true) String id) {
+    public Response getData(@Param(value = "id", required = true) final String id) {
         try {
             return reader.submit(() -> {
                 try {
@@ -67,9 +80,16 @@ public class ServiceImpl extends HttpServer implements Service {
         }
     }
 
+    /**
+     * Method puts data with defined id.
+     *
+     * @param request data
+     * @param id      id
+     * @return status of operation
+     */
     @Path("/v0/entity")
     @RequestMethod(Request.METHOD_PUT)
-    public Response putData(Request request, @Param("id") String id) {
+    public Response putData(final Request request, @Param("id") final String id) {
         try {
             return writer.submit(() ->{
                 try {
@@ -87,9 +107,15 @@ public class ServiceImpl extends HttpServer implements Service {
         }
     }
 
+    /**
+     * Method deletes data with defined id.
+     *
+     * @param id id
+     * @return status of operation
+     */
     @Path("/v0/entity")
     @RequestMethod(Request.METHOD_DELETE)
-    public Response deleteData(@Param("id") String id) {
+    public Response deleteData(@Param("id") final String id) {
         try {
             geniusCheck(id);
             dao.remove(ByteBuffer.wrap(id.getBytes(Charsets.UTF_8)));
@@ -102,12 +128,13 @@ public class ServiceImpl extends HttpServer implements Service {
     }
 
     @Override
-    public void handleDefault(Request request, HttpSession session) throws IOException {
+    public void handleDefault(final Request request, final HttpSession session) throws IOException {
         session.sendResponse(new Response(Response.BAD_REQUEST, Response.EMPTY));
     }
 
-    private void geniusCheck(String id) throws IllegalArgumentException {
-        if (id.equals(""))
+    private void geniusCheck(final String id) throws IllegalArgumentException {
+        if ("".equals(id)) {
             throw new IllegalArgumentException("String ? return; // nothing to do");
+        }
     }
 }

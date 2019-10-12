@@ -17,13 +17,10 @@
 package ru.mail.polis.dao;
 
 import org.jetbrains.annotations.NotNull;
-import ru.mail.polis.Files;
 import ru.mail.polis.dao.physhock.DAOImpl;
 
 import java.io.File;
 import java.io.IOException;
-
-import org.jetbrains.annotations.NotNull;
 
 /**
  * Custom {@link DAO} factory.

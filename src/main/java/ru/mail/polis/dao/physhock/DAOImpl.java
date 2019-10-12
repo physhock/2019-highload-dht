@@ -16,12 +16,13 @@ import java.util.Optional;
 public class DAOImpl implements DAO {
 
     private final RocksDB rocksDB;
+    private static final String ROCK = "RocksDB troubles";
 
-    public DAOImpl(File path) throws IOException {
+    public DAOImpl(final File path) throws IOException {
         this.rocksDB = createDB(path);
     }
 
-    private RocksDB createDB(File path) throws IOException {
+    private RocksDB createDB(final File path) throws IOException {
         RocksDB.loadLibrary();
         try {
             final Options options = new Options()
@@ -36,9 +37,9 @@ public class DAOImpl implements DAO {
 
     @NotNull
     @Override
-    public Iterator<Record> iterator(@NotNull ByteBuffer from) {
+    public Iterator<Record> iterator(@NotNull final ByteBuffer from) {
 
-        RocksIterator iterator = rocksDB.newIterator();
+        final RocksIterator iterator = rocksDB.newIterator();
         iterator.seek(from.array());
 
         return new Iterator<>() {
@@ -49,11 +50,12 @@ public class DAOImpl implements DAO {
 
             @Override
             public Record next() {
-                if (!hasNext())
+                if (!hasNext()) {
                     throw new NoSuchElementException("Next on empty iterator");
-                ByteBuffer key = ByteBuffer.wrap(iterator.key());
-                ByteBuffer value = ByteBuffer.wrap(iterator.value());
-                Record record = Record.of(key, value);
+                }
+                final ByteBuffer key = ByteBuffer.wrap(iterator.key());
+                final ByteBuffer value = ByteBuffer.wrap(iterator.value());
+                final Record record = Record.of(key, value);
                 iterator.next();
                 return record;
             }
@@ -62,29 +64,32 @@ public class DAOImpl implements DAO {
 
     @NotNull
     @Override
-    public ByteBuffer get(@NotNull ByteBuffer key) throws IOException, NoSuchElementException {
+    public ByteBuffer get(@NotNull final ByteBuffer key) throws IOException, NoSuchElementException {
         try {
-            return ByteBuffer.wrap(Optional.ofNullable(rocksDB.get(key.array())).orElseThrow(NoSuchElementExceptionLite::new));
+            return ByteBuffer.wrap(
+                    Optional.ofNullable(rocksDB.get(key.array()))
+                            .orElseThrow(() ->
+                                    new NoSuchElementExceptionLite("This is not the data you are looking for")));
         } catch (RocksDBException e) {
-            throw new IOException("RocksDB troubles", e);
+            throw new IOException(ROCK, e);
         }
     }
 
     @Override
-    public void upsert(@NotNull ByteBuffer key, @NotNull ByteBuffer value) throws IOException {
+    public void upsert(@NotNull final ByteBuffer key, @NotNull final ByteBuffer value) throws IOException {
         try {
             rocksDB.put(key.array(), value.array());
         } catch (RocksDBException e) {
-            throw new IOException("RocksDB troubles", e);
+            throw new IOException(ROCK, e);
         }
     }
 
     @Override
-    public void remove(@NotNull ByteBuffer key) throws IOException {
+    public void remove(@NotNull final ByteBuffer key) throws IOException {
         try {
             rocksDB.delete(key.array());
         } catch (RocksDBException e) {
-            throw new IOException("RocksDB troubles", e);
+            throw new IOException(ROCK, e);
         }
     }
 
