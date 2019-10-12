@@ -10,15 +10,21 @@ import ru.mail.polis.service.Service;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Collections;
-import java.util.NoSuchElementException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class ServiceImpl extends HttpServer implements Service {
 
     private final DAO dao;
+    private final ExecutorService reader;
+    private final ExecutorService writer;
 
     public ServiceImpl(int port, DAO dao) throws IOException {
         super(getConfig(port), dao);
         this.dao = dao;
+        this.reader = Executors.newFixedThreadPool(1);
+        this.writer = Executors.newFixedThreadPool(4);
     }
 
     private static HttpServerConfig getConfig(int port) {
@@ -40,18 +46,24 @@ public class ServiceImpl extends HttpServer implements Service {
     @RequestMethod(Request.METHOD_GET)
     public Response getData(@Param(value = "id", required = true) String id) {
         try {
-            geniusCheck(id);
-            ByteBuffer result = dao.get(ByteBuffer.wrap(id.getBytes(Charsets.UTF_8)));
-            ByteBuffer duplicate = result.duplicate();
-            byte[] body = new byte[duplicate.remaining()];
-            duplicate.get(body);
-            return new Response(Response.OK, body);
-        } catch (NoSuchElementExceptionLite e) {
-            return new Response(Response.NOT_FOUND, Response.EMPTY);
-        } catch (IOException e) {
+            return reader.submit(() -> {
+                try {
+                    geniusCheck(id);
+                    ByteBuffer result = dao.get(ByteBuffer.wrap(id.getBytes(Charsets.UTF_8)));
+                    ByteBuffer duplicate = result.duplicate();
+                    byte[] body = new byte[duplicate.remaining()];
+                    duplicate.get(body);
+                    return new Response(Response.OK, body);
+                } catch (NoSuchElementExceptionLite e) {
+                    return new Response(Response.NOT_FOUND, Response.EMPTY);
+                } catch (IOException e) {
+                    return new Response(Response.INTERNAL_ERROR, Response.EMPTY);
+                } catch (IllegalArgumentException e) {
+                    return new Response(Response.BAD_REQUEST, Response.EMPTY);
+                }
+            }).get();
+        } catch (InterruptedException | ExecutionException e) {
             return new Response(Response.INTERNAL_ERROR, Response.EMPTY);
-        } catch (IllegalArgumentException e) {
-            return new Response(Response.BAD_REQUEST, Response.EMPTY);
         }
     }
 
@@ -59,12 +71,18 @@ public class ServiceImpl extends HttpServer implements Service {
     @RequestMethod(Request.METHOD_PUT)
     public Response putData(Request request, @Param("id") String id) {
         try {
-            geniusCheck(id);
-            dao.upsert(ByteBuffer.wrap(id.getBytes(Charsets.UTF_8)), ByteBuffer.wrap(request.getBody()));
-            return new Response(Response.CREATED, Response.EMPTY);
-        } catch (IOException e) {
-            return new Response(Response.INTERNAL_ERROR, Response.EMPTY);
-        } catch (IllegalArgumentException e) {
+            return writer.submit(() ->{
+                try {
+                    geniusCheck(id);
+                    dao.upsert(ByteBuffer.wrap(id.getBytes(Charsets.UTF_8)), ByteBuffer.wrap(request.getBody()));
+                    return new Response(Response.CREATED, Response.EMPTY);
+                } catch (IOException e) {
+                    return new Response(Response.INTERNAL_ERROR, Response.EMPTY);
+                } catch (IllegalArgumentException e) {
+                    return new Response(Response.BAD_REQUEST, Response.EMPTY);
+                }
+            }).get();
+        } catch (InterruptedException | ExecutionException e) {
             return new Response(Response.BAD_REQUEST, Response.EMPTY);
         }
     }

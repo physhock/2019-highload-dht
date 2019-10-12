@@ -25,6 +25,7 @@ public class DAOImpl implements DAO {
         RocksDB.loadLibrary();
         try {
             final Options options = new Options()
+                    .prepareForBulkLoad()
                     .setCreateIfMissing(true)
                     .setComparator(new BytewiseComparator(new ComparatorOptions()));
             return RocksDB.open(options, path.getAbsolutePath());
