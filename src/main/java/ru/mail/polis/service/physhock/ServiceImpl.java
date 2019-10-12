@@ -4,6 +4,7 @@ import com.google.common.base.Charsets;
 import one.nio.http.*;
 import one.nio.server.AcceptorConfig;
 import ru.mail.polis.dao.DAO;
+import ru.mail.polis.dao.physhock.ByteBufferUtils;
 import ru.mail.polis.dao.physhock.NoSuchElementExceptionLite;
 import ru.mail.polis.service.Service;
 
@@ -17,14 +18,12 @@ import java.util.concurrent.Executors;
 public class ServiceImpl extends HttpServer implements Service {
 
     private final DAO dao;
-    private final ExecutorService reader;
-    private final ExecutorService writer;
+    private final ExecutorService executor;
 
     public ServiceImpl(final int port, final DAO dao) throws IOException {
         super(getConfig(port), dao);
         this.dao = dao;
-        this.reader = Executors.newFixedThreadPool(1);
-        this.writer = Executors.newFixedThreadPool(4);
+        this.executor = Executors.newFixedThreadPool(4);
     }
 
     private static HttpServerConfig getConfig(final int port) {
@@ -59,14 +58,11 @@ public class ServiceImpl extends HttpServer implements Service {
     @RequestMethod(Request.METHOD_GET)
     public Response getData(@Param(value = "id", required = true) final String id) {
         try {
-            return reader.submit(() -> {
+            return executor.submit(() -> {
                 try {
                     geniusCheck(id);
                     ByteBuffer result = dao.get(ByteBuffer.wrap(id.getBytes(Charsets.UTF_8)));
-                    ByteBuffer duplicate = result.duplicate();
-                    byte[] body = new byte[duplicate.remaining()];
-                    duplicate.get(body);
-                    return new Response(Response.OK, body);
+                    return new Response(Response.OK, ByteBufferUtils.getByteArray(result));
                 } catch (NoSuchElementExceptionLite e) {
                     return new Response(Response.NOT_FOUND, Response.EMPTY);
                 } catch (IOException e) {
@@ -91,7 +87,7 @@ public class ServiceImpl extends HttpServer implements Service {
     @RequestMethod(Request.METHOD_PUT)
     public Response putData(final Request request, @Param("id") final String id) {
         try {
-            return writer.submit(() ->{
+            return executor.submit(() ->{
                 try {
                     geniusCheck(id);
                     dao.upsert(ByteBuffer.wrap(id.getBytes(Charsets.UTF_8)), ByteBuffer.wrap(request.getBody()));
