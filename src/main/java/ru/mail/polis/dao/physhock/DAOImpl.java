@@ -96,7 +96,7 @@ public class DAOImpl implements DAO {
         try {
             rocksDB.compactRange();
         } catch (RocksDBException exception) {
-            throw new IOException("Error while compact", exception);
+            throw new IOException(ROCK, exception);
         }
     }
 

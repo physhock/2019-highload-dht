@@ -16,11 +16,14 @@
 
 package ru.mail.polis.service;
 
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.jetbrains.annotations.NotNull;
 import ru.mail.polis.dao.DAO;
 import ru.mail.polis.service.physhock.ServiceImpl;
 
 import java.io.IOException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Constructs {@link Service} instances.
@@ -53,6 +56,9 @@ public final class ServiceFactory {
             throw new IllegalArgumentException("Port out of range");
         }
 
-        return new ServiceImpl(port, dao);
+        ExecutorService service = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors(),
+                new ThreadFactoryBuilder().setNameFormat("slaves").build());
+
+        return new ServiceImpl(port, dao, service);
     }
 }
