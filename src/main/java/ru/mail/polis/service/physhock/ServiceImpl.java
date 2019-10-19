@@ -3,8 +3,11 @@ package ru.mail.polis.service.physhock;
 import com.google.common.base.Charsets;
 import com.google.common.collect.Iterables;
 import one.nio.http.*;
+import one.nio.net.Socket;
 import one.nio.server.AcceptorConfig;
+import one.nio.server.RejectedSessionException;
 import org.jetbrains.annotations.NotNull;
+import ru.mail.polis.Record;
 import ru.mail.polis.dao.DAO;
 import ru.mail.polis.dao.physhock.ByteBufferUtils;
 import ru.mail.polis.dao.physhock.NoSuchElementExceptionLite;
@@ -14,6 +17,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
+import java.util.Iterator;
 import java.util.concurrent.Executor;
 
 public class ServiceImpl extends HttpServer implements Service {
@@ -21,7 +25,7 @@ public class ServiceImpl extends HttpServer implements Service {
     private final DAO dao;
     private final Executor executor;
 
-    public ServiceImpl(final int port, final DAO dao, Executor executor) throws IOException {
+    public ServiceImpl(final int port, final DAO dao, final Executor executor) throws IOException {
         super(getConfig(port), dao);
         this.dao = dao;
         this.executor = executor;
@@ -62,7 +66,7 @@ public class ServiceImpl extends HttpServer implements Service {
         executor.execute(() -> {
             try {
                 geniusCheck(id);
-                ByteBuffer result = dao.get(ByteBuffer.wrap(id.getBytes(Charsets.UTF_8)));
+                final ByteBuffer result = dao.get(ByteBuffer.wrap(id.getBytes(Charsets.UTF_8)));
                 final Response response = new Response(Response.OK, ByteBufferUtils.getByteArray(result));
                 putResponseToSession(session, response);
             } catch (NoSuchElementExceptionLite e) {
@@ -127,12 +131,42 @@ public class ServiceImpl extends HttpServer implements Service {
                 putResponseToSession(session, response);
             }
         });
+    }
 
+    @Path("/v0/entities")
+    @RequestMethod(Request.METHOD_GET)
+    public void getRange(@Param(value = "start", required = true) final String start,
+                         @Param(value = "end") final String end,
+                         final HttpSession session, final Request request) {
+        executor.execute(() -> {
+            try {
+                geniusCheck(start);
+                final ByteBuffer from = ByteBuffer.wrap(start.getBytes(Charsets.UTF_8));
+                ByteBuffer to = end == null || end.isEmpty()
+                        ? null
+                        : ByteBuffer.wrap(end.getBytes(Charsets.UTF_8));
+                try {
+                    final Iterator<Record> iterator = dao.range(from, to);
+                    final ChunkedSession storageSession = (ChunkedSession) session;
+                    storageSession.stream(iterator);
+                } catch (IOException e) {
+                    throw new UncheckedIOException("Session troubles", e);
+                }
+            } catch (IllegalArgumentException e) {
+                final Response response = new Response(Response.BAD_REQUEST, Response.EMPTY);
+                putResponseToSession(session, response);
+            }
+        });
     }
 
     @Override
     public void handleDefault(final Request request, final HttpSession session) throws IOException {
         session.sendResponse(new Response(Response.BAD_REQUEST, Response.EMPTY));
+    }
+
+    @Override
+    public HttpSession createSession(Socket socket) throws RejectedSessionException {
+        return new ChunkedSession(socket, this);
     }
 
     private void geniusCheck(final String id) throws IllegalArgumentException {
