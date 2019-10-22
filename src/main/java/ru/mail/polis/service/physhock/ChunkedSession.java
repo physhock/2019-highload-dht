@@ -15,8 +15,11 @@ import java.util.Iterator;
 public class ChunkedSession extends HttpSession {
 
     private Iterator<Record> iterator;
+    private static final byte[] RN = "\r\n".getBytes(Charsets.UTF_8);
+    private static final byte[] N = "\n".getBytes(Charsets.UTF_8);
+    private static final byte[] EMPTY = "0\r\n\r\n".getBytes(Charsets.UTF_8);
 
-    public ChunkedSession(Socket socket, HttpServer server) {
+    public ChunkedSession(final Socket socket, final HttpServer server) {
         super(socket, server);
     }
 
@@ -41,22 +44,19 @@ public class ChunkedSession extends HttpSession {
         final byte[] key = ByteBufferUtils.getByteArray(record.getKey());
         final byte[] value = ByteBufferUtils.getByteArray(record.getValue());
 
-        final byte[] rn = "\r\n".getBytes(Charsets.UTF_8);
-        final byte[] n = "\n".getBytes(Charsets.UTF_8);
-
-        final int size = key.length + value.length + n.length;
+        final int size = key.length + value.length + N.length;
         final byte[] hexSize = Integer.toHexString(size).getBytes(Charsets.UTF_8);
-        final int len = size + hexSize.length + 2 * rn.length;
+        final int len = size + hexSize.length + 2 * RN.length;
 
         final byte[] res = new byte[len];
         final ByteBuffer buffer = ByteBuffer.wrap(res);
 
         buffer.put(hexSize);
-        buffer.put(rn);
+        buffer.put(RN);
         buffer.put(key);
-        buffer.put(n);
+        buffer.put(N);
         buffer.put(value);
-        buffer.put(rn);
+        buffer.put(RN);
 
         return res;
     }
@@ -71,8 +71,7 @@ public class ChunkedSession extends HttpSession {
             return;
         }
 
-        final byte[] empty = "0\r\n\r\n".getBytes(Charsets.UTF_8);
-        write(empty, 0, empty.length);
+        write(EMPTY, 0, EMPTY.length);
 
         server.incRequestsProcessed();
         if ((handling = pipeline.pollFirst()) != null) {
@@ -89,5 +88,4 @@ public class ChunkedSession extends HttpSession {
         super.processWrite();
         next();
     }
-
 }

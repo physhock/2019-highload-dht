@@ -2,8 +2,10 @@ package ru.mail.polis.dao.physhock;
 
 import java.util.NoSuchElementException;
 
-@SuppressWarnings("serial")
+
 public class NoSuchElementExceptionLite extends NoSuchElementException {
+    private static final long serialVersionUID = 1L;
+
     public NoSuchElementExceptionLite(final String s) {
         super(s);
     }

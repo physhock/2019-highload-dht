@@ -1,7 +1,11 @@
 package ru.mail.polis.dao.physhock;
 
 import org.jetbrains.annotations.NotNull;
-import org.rocksdb.*;
+import org.rocksdb.BuiltinComparator;
+import org.rocksdb.Options;
+import org.rocksdb.RocksDB;
+import org.rocksdb.RocksDBException;
+import org.rocksdb.RocksIterator;
 import ru.mail.polis.Record;
 import ru.mail.polis.dao.DAO;
 
@@ -29,7 +33,7 @@ public class DAOImpl implements DAO {
                     .setComparator(BuiltinComparator.BYTEWISE_COMPARATOR);
             return RocksDB.open(options, path.getAbsolutePath());
         } catch (RocksDBException e) {
-            throw new IOException("Cannot create DB");
+            throw new IOException("Cannot create DB", e);
         }
     }
 
