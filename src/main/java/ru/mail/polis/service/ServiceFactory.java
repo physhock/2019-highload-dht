@@ -16,8 +16,8 @@
 
 package ru.mail.polis.service;
 
-
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+
 import java.io.IOException;
 import java.util.Set;
 
@@ -25,7 +25,6 @@ import org.jetbrains.annotations.NotNull;
 import ru.mail.polis.dao.DAO;
 import ru.mail.polis.service.physhock.ServiceImpl;
 
-import java.io.IOException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
