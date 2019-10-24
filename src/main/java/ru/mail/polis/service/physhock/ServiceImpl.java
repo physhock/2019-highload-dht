@@ -1,6 +1,7 @@
 package ru.mail.polis.service.physhock;
 
 import com.google.common.base.Charsets;
+import one.nio.http.HttpClient;
 import one.nio.http.HttpServer;
 import one.nio.http.HttpServerConfig;
 import one.nio.http.HttpSession;
@@ -34,6 +35,9 @@ public class ServiceImpl extends HttpServer implements Service {
     private static final Response BAD_REQUEST = new Response(Response.BAD_REQUEST, Response.EMPTY);
     private final DAO dao;
     private final Executor executor;
+    private final Topology<String> topology;
+    private final HttpClient httpClient;
+
 
     /**
      * Server constructor.
@@ -43,10 +47,14 @@ public class ServiceImpl extends HttpServer implements Service {
      * @param executor executor service
      * @throws IOException super thrower
      */
-    public ServiceImpl(final int port, final DAO dao, final Executor executor) throws IOException {
+    public ServiceImpl(final int port, final DAO dao,
+                       final Executor executor,
+                       final Topology<String> topology) throws IOException {
         super(getConfig(port), dao);
         this.dao = dao;
         this.executor = executor;
+        this.topology = topology;
+        httpClient = new ;
     }
 
     @NotNull
@@ -190,5 +198,13 @@ public class ServiceImpl extends HttpServer implements Service {
         } catch (IOException e) {
             throw new UncheckedIOException("Session troubles", e);
         }
+    }
+
+    private boolean nodeCoordinator(ByteBuffer key, Request request){
+
+        final String node = topology.calculateFor(key);
+        if (topology.isMe(node))
+            return true;
+        else
     }
 }

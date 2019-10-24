@@ -17,14 +17,14 @@
 package ru.mail.polis.service;
 
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
-
-import java.io.IOException;
-import java.util.Set;
-
 import org.jetbrains.annotations.NotNull;
 import ru.mail.polis.dao.DAO;
 import ru.mail.polis.service.physhock.ServiceImpl;
+import ru.mail.polis.service.physhock.SimpleTopology;
+import ru.mail.polis.service.physhock.Topology;
 
+import java.io.IOException;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -63,7 +63,8 @@ public final class ServiceFactory {
 
         final ExecutorService service = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors(),
                 new ThreadFactoryBuilder().setNameFormat("slaves").build());
+        final Topology<String> simpleOne = new SimpleTopology("http://localhost:" + port, topology);
 
-        return new ServiceImpl(port, dao, service);
+        return new ServiceImpl(port, dao, service, simpleOne);
     }
 }
