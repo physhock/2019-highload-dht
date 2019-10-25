@@ -2,6 +2,7 @@ package ru.mail.polis.service.physhock;
 
 import com.google.common.base.Charsets;
 import one.nio.http.HttpClient;
+import one.nio.http.HttpException;
 import one.nio.http.HttpServer;
 import one.nio.http.HttpServerConfig;
 import one.nio.http.HttpSession;
@@ -10,7 +11,9 @@ import one.nio.http.Path;
 import one.nio.http.Request;
 import one.nio.http.RequestMethod;
 import one.nio.http.Response;
+import one.nio.net.ConnectionString;
 import one.nio.net.Socket;
+import one.nio.pool.PoolException;
 import one.nio.server.AcceptorConfig;
 import org.jetbrains.annotations.NotNull;
 import ru.mail.polis.Record;
@@ -36,8 +39,6 @@ public class ServiceImpl extends HttpServer implements Service {
     private final DAO dao;
     private final Executor executor;
     private final Topology<String> topology;
-    private final HttpClient httpClient;
-
 
     /**
      * Server constructor.
@@ -45,16 +46,16 @@ public class ServiceImpl extends HttpServer implements Service {
      * @param port     server port
      * @param dao      dao ( RocksDB dao)
      * @param executor executor service
-     * @throws IOException super thrower
+     * @throws IOException internal error
      */
     public ServiceImpl(final int port, final DAO dao,
                        final Executor executor,
-                       final Topology<String> topology) throws IOException {
+                       final Topology<String> topology
+    ) throws IOException {
         super(getConfig(port), dao);
         this.dao = dao;
         this.executor = executor;
         this.topology = topology;
-        httpClient = new ;
     }
 
     @NotNull
@@ -79,70 +80,95 @@ public class ServiceImpl extends HttpServer implements Service {
     }
 
     /**
-     * Method returns data if exists.
+     * General handler for "/v0/entity" requests.
      *
-     * @param id key value
+     * @param id      identifier
+     * @param session created session
+     * @param request incoming request
+     * @see #getData(ByteBuffer)
+     * @see #putData(ByteBuffer, byte[])
+     * @see #deleteData(ByteBuffer)
      */
     @Path("/v0/entity")
-    @RequestMethod(Request.METHOD_GET)
-    public void getData(@Param(value = "id", required = true) final String id, final HttpSession session) {
-        if(geniusCheck(id, session)) {
-            executor.execute(() -> {
-                try {
-                    final ByteBuffer result = dao.get(ByteBuffer.wrap(id.getBytes(Charsets.UTF_8)));
-                    final Response response = new Response(Response.OK, ByteBufferUtils.getByteArray(result));
-                    putResponseToSession(session, response);
-                } catch (NoSuchElementExceptionLite e) {
-                    final Response response = new Response(Response.NOT_FOUND, Response.EMPTY);
-                    putResponseToSession(session, response);
-                } catch (IOException e) {
-                    putResponseToSession(session, INTERNAL_ERROR);
+    public void entityHandler(@Param(value = "id", required = true) String id,
+                              final HttpSession session,
+                              final Request request) {
+        if (!id.isBlank()) {
+            final ByteBuffer key = ByteBuffer.wrap(id.getBytes(Charsets.UTF_8));
+            final String node = topology.calculateFor(key);
+            if (topology.isMe(node)) {
+                switch (request.getMethod()) {
+                    case Request.METHOD_GET:
+                        sendResponse(session, () -> getData(key));
+                        break;
+                    case Request.METHOD_PUT:
+                        sendResponse(session, () -> putData(key, request.getBody()));
+                        break;
+                    case Request.METHOD_DELETE:
+                        sendResponse(session, () -> deleteData(key));
+                        break;
                 }
-            });
+            } else {
+                sendResponse(session, () -> sendToNode(node, request));
+            }
+        } else {
+            sendResponse(session, () -> BAD_REQUEST);
+        }
+    }
+
+    private void sendResponse(final HttpSession session, final MethodHandler method) {
+        executor.execute(() -> {
+            try {
+                session.sendResponse(method.handle());
+            } catch (IOException e) {
+                try {
+                    session.sendError(Response.INTERNAL_ERROR, null);
+                } catch (IOException ex) {
+                    throw new UncheckedIOException("Things goes bad", e);
+                }
+            }
+        });
+    }
+
+    /**
+     * Method gets data by specified key.
+     *
+     * @param key identifier
+     * @return HttpStatus.OK if found, else HttpStatus.NOT_FOUND
+     * @throws IOException internal error
+     */
+    private Response getData(final ByteBuffer key) throws IOException {
+        try {
+            final ByteBuffer result = dao.get(key);
+            return new Response(Response.OK, ByteBufferUtils.getByteArray(result));
+        } catch (NoSuchElementExceptionLite e) {
+            return new Response(Response.NOT_FOUND, Response.EMPTY);
         }
     }
 
     /**
-     * Method puts data with defined id.
+     * Method puts data by specified key.
      *
-     * @param request data
-     * @param id      id
+     * @param key  data identifier
+     * @param data data
+     * @return HttpStatus.CREATED
+     * @throws IOException internal error
      */
-    @Path("/v0/entity")
-    @RequestMethod(Request.METHOD_PUT)
-    public void putData(final Request request, @Param("id") final String id, final HttpSession session) {
-        if(geniusCheck(id, session)) {
-            executor.execute(() -> {
-                try {
-                    dao.upsert(ByteBuffer.wrap(id.getBytes(Charsets.UTF_8)), ByteBuffer.wrap(request.getBody()));
-                    final Response response = new Response(Response.CREATED, Response.EMPTY);
-                    putResponseToSession(session, response);
-                } catch (IOException e) {
-                    putResponseToSession(session, INTERNAL_ERROR);
-                }
-            });
-        }
+    private Response putData(final ByteBuffer key, final byte[] data) throws IOException {
+        dao.upsert(key, ByteBuffer.wrap(data));
+        return new Response(Response.CREATED, Response.EMPTY);
     }
 
     /**
-     * Method deletes data with defined id.
+     * Method deletes data with defined key.
      *
-     * @param id id
+     * @param key data identifier
+     * @return HttpStatus.ACCEPTED
+     * @throws IOException internal error
      */
-    @Path("/v0/entity")
-    @RequestMethod(Request.METHOD_DELETE)
-    public void deleteData(@Param("id") final String id, final HttpSession session) {
-        if(geniusCheck(id, session)) {
-            executor.execute(() -> {
-                try {
-                    dao.remove(ByteBuffer.wrap(id.getBytes(Charsets.UTF_8)));
-                    final Response response = new Response(Response.ACCEPTED, Response.EMPTY);
-                    putResponseToSession(session, response);
-                } catch (IOException e) {
-                    putResponseToSession(session, INTERNAL_ERROR);
-                }
-            });
-        }
+    private Response deleteData(final ByteBuffer key) throws IOException {
+        dao.remove(key);
+        return new Response(Response.ACCEPTED, Response.EMPTY);
     }
 
     /**
@@ -157,7 +183,7 @@ public class ServiceImpl extends HttpServer implements Service {
     public void getRange(@Param(value = "start", required = true) final String start,
                          @Param(value = "end") final String end,
                          final HttpSession session) {
-        if (geniusCheck(start, session)) {
+        if (!start.isBlank()) {
             executor.execute(() -> {
                 final ByteBuffer from = ByteBuffer.wrap(start.getBytes(Charsets.UTF_8));
                 final ByteBuffer to = end == null || end.isEmpty()
@@ -171,6 +197,17 @@ public class ServiceImpl extends HttpServer implements Service {
                     throw new UncheckedIOException("Session troubles", e);
                 }
             });
+        } else {
+            sendResponse(session, () -> BAD_REQUEST);
+        }
+    }
+
+    private Response sendToNode(final String node, final Request request) {
+        final HttpClient httpClient = new HttpClient(new ConnectionString(node + request.getURI()));
+        try {
+            return httpClient.invoke(request, 100);
+        } catch (InterruptedException | PoolException | IOException | HttpException e) {
+            return INTERNAL_ERROR;
         }
     }
 
@@ -184,27 +221,8 @@ public class ServiceImpl extends HttpServer implements Service {
         return new ChunkedSession(socket, this);
     }
 
-    private boolean geniusCheck(final String id, final HttpSession session) {
-        final boolean equals = "".equals(id);
-        if (equals) {
-            putResponseToSession(session, BAD_REQUEST);
-        }
-        return !equals;
-    }
-
-    private void putResponseToSession(@NotNull final HttpSession session, final Response response) {
-        try {
-            session.sendResponse(response);
-        } catch (IOException e) {
-            throw new UncheckedIOException("Session troubles", e);
-        }
-    }
-
-    private boolean nodeCoordinator(ByteBuffer key, Request request){
-
-        final String node = topology.calculateFor(key);
-        if (topology.isMe(node))
-            return true;
-        else
+    @FunctionalInterface
+    private interface MethodHandler {
+        Response handle() throws IOException;
     }
 }
