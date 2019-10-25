@@ -15,6 +15,9 @@ import one.nio.net.ConnectionString;
 import one.nio.net.Socket;
 import one.nio.pool.PoolException;
 import one.nio.server.AcceptorConfig;
+import one.nio.server.Server;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.jetbrains.annotations.NotNull;
 import ru.mail.polis.Record;
 import ru.mail.polis.dao.DAO;
@@ -34,6 +37,7 @@ import java.util.concurrent.Executor;
  */
 public class ServiceImpl extends HttpServer implements Service {
 
+    private static final Log LOG = LogFactory.getLog(Server.class);
     private static final Response INTERNAL_ERROR = new Response(Response.INTERNAL_ERROR, Response.EMPTY);
     private static final Response BAD_REQUEST = new Response(Response.BAD_REQUEST, Response.EMPTY);
     private final DAO dao;
@@ -127,9 +131,8 @@ public class ServiceImpl extends HttpServer implements Service {
                 try {
                     session.sendError(Response.INTERNAL_ERROR, null);
                 } catch (IOException ex) {
-                    throw new UncheckedIOException("Things goes bad", ex);
+                    LOG.error("Things goes bad" + ex);
                 }
-                throw new UncheckedIOException(e);
             }
         });
     }
