@@ -4,11 +4,20 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Set;
 
+/**
+ * Simple way to handle sharding.
+ */
 public class SimpleTopology implements Topology<String> {
 
     private final String thisNode;
     private final String[] allNodes;
 
+    /**
+     * Class for serving sharding features.
+     *
+     * @param thisNode current node
+     * @param allNodes list of all nodes
+     */
     public SimpleTopology(final String thisNode, final Set<String> allNodes) {
         this.thisNode = thisNode;
         this.allNodes = new String[allNodes.size()];

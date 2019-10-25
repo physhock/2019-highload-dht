@@ -90,10 +90,12 @@ public class ServiceImpl extends HttpServer implements Service {
      * @see #deleteData(ByteBuffer)
      */
     @Path("/v0/entity")
-    public void entityHandler(@Param(value = "id", required = true) String id,
+    public void entityHandler(@Param(value = "id", required = true) final String id,
                               final HttpSession session,
                               final Request request) {
-        if (!id.isBlank()) {
+        if (id.isBlank()) {
+            sendResponse(session, () -> BAD_REQUEST);
+        } else {
             final ByteBuffer key = ByteBuffer.wrap(id.getBytes(Charsets.UTF_8));
             final String node = topology.calculateFor(key);
             if (topology.isMe(node)) {
@@ -107,12 +109,13 @@ public class ServiceImpl extends HttpServer implements Service {
                     case Request.METHOD_DELETE:
                         sendResponse(session, () -> deleteData(key));
                         break;
+                    default:
+                        sendResponse(session, () -> BAD_REQUEST);
+                        break;
                 }
             } else {
                 sendResponse(session, () -> sendToNode(node, request));
             }
-        } else {
-            sendResponse(session, () -> BAD_REQUEST);
         }
     }
 
@@ -124,8 +127,9 @@ public class ServiceImpl extends HttpServer implements Service {
                 try {
                     session.sendError(Response.INTERNAL_ERROR, null);
                 } catch (IOException ex) {
-                    throw new UncheckedIOException("Things goes bad", e);
+                    throw new UncheckedIOException("Things goes bad", ex);
                 }
+                throw new UncheckedIOException(e);
             }
         });
     }
@@ -183,7 +187,9 @@ public class ServiceImpl extends HttpServer implements Service {
     public void getRange(@Param(value = "start", required = true) final String start,
                          @Param(value = "end") final String end,
                          final HttpSession session) {
-        if (!start.isBlank()) {
+        if (start.isBlank()) {
+            sendResponse(session, () -> BAD_REQUEST);
+        } else {
             executor.execute(() -> {
                 final ByteBuffer from = ByteBuffer.wrap(start.getBytes(Charsets.UTF_8));
                 final ByteBuffer to = end == null || end.isEmpty()
@@ -197,8 +203,6 @@ public class ServiceImpl extends HttpServer implements Service {
                     throw new UncheckedIOException("Session troubles", e);
                 }
             });
-        } else {
-            sendResponse(session, () -> BAD_REQUEST);
         }
     }
 
