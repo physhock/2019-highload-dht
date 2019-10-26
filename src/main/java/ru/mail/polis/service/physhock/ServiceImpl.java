@@ -15,10 +15,9 @@ import one.nio.net.ConnectionString;
 import one.nio.net.Socket;
 import one.nio.pool.PoolException;
 import one.nio.server.AcceptorConfig;
-import one.nio.server.Server;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 import org.jetbrains.annotations.NotNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import ru.mail.polis.Record;
 import ru.mail.polis.dao.DAO;
 import ru.mail.polis.dao.physhock.ByteBufferUtils;
@@ -27,22 +26,25 @@ import ru.mail.polis.service.Service;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.lang.invoke.MethodHandles;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.concurrent.Executor;
+import java.util.stream.Collectors;
 
 /**
  * Implementation of Service.
  */
 public class ServiceImpl extends HttpServer implements Service {
 
-    private static final Log LOG = LogFactory.getLog(Server.class);
-    private static final Response INTERNAL_ERROR = new Response(Response.INTERNAL_ERROR, Response.EMPTY);
+    private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     private static final Response BAD_REQUEST = new Response(Response.BAD_REQUEST, Response.EMPTY);
     private final DAO dao;
     private final Executor executor;
     private final Topology<String> topology;
+    private final Map<String, HttpClient> nodes;
 
     /**
      * Server constructor.
@@ -60,6 +62,10 @@ public class ServiceImpl extends HttpServer implements Service {
         this.dao = dao;
         this.executor = executor;
         this.topology = topology;
+        this.nodes = topology
+                .all()
+                .stream()
+                .collect(Collectors.toMap(node -> node, node -> new HttpClient(new ConnectionString(node))));
     }
 
     @NotNull
@@ -129,9 +135,10 @@ public class ServiceImpl extends HttpServer implements Service {
                 session.sendResponse(method.handle());
             } catch (IOException e) {
                 try {
-                    session.sendError(Response.INTERNAL_ERROR, null);
+                    session.sendError(Response.INTERNAL_ERROR, e.getMessage());
+                    log.error("Things goes bad", e);
                 } catch (IOException ex) {
-                    LOG.error("Things goes bad" + ex);
+                    log.error("Things goes really bad", ex);
                 }
             }
         });
@@ -209,12 +216,11 @@ public class ServiceImpl extends HttpServer implements Service {
         }
     }
 
-    private Response sendToNode(final String node, final Request request) {
-        final HttpClient httpClient = new HttpClient(new ConnectionString(node + request.getURI()));
+    private Response sendToNode(final String node, final Request request) throws IOException {
         try {
-            return httpClient.invoke(request, 100);
+            return nodes.get(node).invoke(request, 100);
         } catch (InterruptedException | PoolException | IOException | HttpException e) {
-            return INTERNAL_ERROR;
+            throw new IOException("proxy troubles", e);
         }
     }
 
