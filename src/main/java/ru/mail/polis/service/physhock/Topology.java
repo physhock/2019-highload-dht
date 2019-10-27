@@ -13,5 +13,4 @@ public interface Topology<T> {
     T calculateFor(final ByteBuffer key);
 
     Set<T> all();
-
 }
