@@ -24,6 +24,7 @@ import ru.mail.polis.service.physhock.SimpleTopology;
 import ru.mail.polis.service.physhock.Topology;
 
 import java.io.IOException;
+import java.net.http.HttpClient;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -64,7 +65,8 @@ public final class ServiceFactory {
         final ExecutorService service = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors(),
                 new ThreadFactoryBuilder().setNameFormat("slave-%d").build());
         final Topology<String> simpleOne = new SimpleTopology("http://localhost:" + port, topology);
+        final HttpClient client = HttpClient.newHttpClient();
 
-        return new ServiceImpl(port, dao, service, simpleOne);
+        return new ServiceImpl(port, dao, service, client, simpleOne);
     }
 }

@@ -32,9 +32,18 @@ public class SimpleTopology implements Topology<String> {
 
     @Override
     public String calculateFor(final ByteBuffer key) {
+        return allNodes[calculateNodeIndex(key)];
+    }
+
+    @Override
+    public String findNextNode(final ByteBuffer key, final int offset) {
+        final int nextNode = (calculateNodeIndex(key) + offset) % allNodes.length;
+        return allNodes[nextNode];
+    }
+
+    private int calculateNodeIndex(final ByteBuffer key) {
         final int hash = key.hashCode();
-        final int node = (hash & Integer.MAX_VALUE) % allNodes.length;
-        return allNodes[node];
+        return (hash & Integer.MAX_VALUE) % allNodes.length;
     }
 
     @Override

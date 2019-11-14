@@ -1,8 +1,6 @@
 package ru.mail.polis.service.physhock;
 
 import com.google.common.base.Charsets;
-import one.nio.http.HttpClient;
-import one.nio.http.HttpException;
 import one.nio.http.HttpServer;
 import one.nio.http.HttpServerConfig;
 import one.nio.http.HttpSession;
@@ -11,9 +9,7 @@ import one.nio.http.Path;
 import one.nio.http.Request;
 import one.nio.http.RequestMethod;
 import one.nio.http.Response;
-import one.nio.net.ConnectionString;
 import one.nio.net.Socket;
-import one.nio.pool.PoolException;
 import one.nio.server.AcceptorConfig;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
@@ -27,10 +23,16 @@ import ru.mail.polis.service.Service;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.lang.invoke.MethodHandles;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
@@ -41,10 +43,12 @@ public class ServiceImpl extends HttpServer implements Service {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     private static final Response BAD_REQUEST = new Response(Response.BAD_REQUEST, Response.EMPTY);
+    private static final String MEAT_BAG_CHECK = "Request from node";
     private final DAO dao;
     private final Executor executor;
     private final Topology<String> topology;
-    private final Map<String, HttpClient> nodes;
+    private final HttpClient client;
+    private final Map<String, HttpRequest> nodes;
 
     /**
      * Server constructor.
@@ -56,16 +60,19 @@ public class ServiceImpl extends HttpServer implements Service {
      */
     public ServiceImpl(final int port, final DAO dao,
                        final Executor executor,
+                       final HttpClient client,
                        final Topology<String> topology
     ) throws IOException {
         super(getConfig(port), dao);
         this.dao = dao;
         this.executor = executor;
+        this.client = client;
         this.topology = topology;
         this.nodes = topology
                 .all()
                 .stream()
-                .collect(Collectors.toMap(node -> node, node -> new HttpClient(new ConnectionString(node))));
+                .collect(Collectors.toMap(node -> node, node ->
+                        HttpRequest.newBuilder().uri(URI.create(node)).build()));
     }
 
     @NotNull
@@ -101,6 +108,7 @@ public class ServiceImpl extends HttpServer implements Service {
      */
     @Path("/v0/entity")
     public void entityHandler(@Param(value = "id", required = true) final String id,
+                              @Param(value = "replicas") final String replicas,
                               final HttpSession session,
                               final Request request) {
         if (id.isBlank()) {
@@ -108,7 +116,7 @@ public class ServiceImpl extends HttpServer implements Service {
         } else {
             final ByteBuffer key = ByteBuffer.wrap(id.getBytes(Charsets.UTF_8));
             final String node = topology.calculateFor(key);
-            if (topology.isMe(node)) {
+            if (topology.isMe(node) && "true".equals(request.getHeader(MEAT_BAG_CHECK))) {
                 switch (request.getMethod()) {
                     case Request.METHOD_GET:
                         sendResponse(session, () -> getData(key));
@@ -123,9 +131,28 @@ public class ServiceImpl extends HttpServer implements Service {
                         sendResponse(session, () -> BAD_REQUEST);
                         break;
                 }
+            } else if (topology.isMe(node) && request.getHeader(MEAT_BAG_CHECK) == null) {
+                coordinateRequest(key,
+                        Optional.ofNullable(replicas).orElse("2/3"),
+                        session, request);
             } else {
-                sendResponse(session, () -> sendToNode(node, request));
+                sendToNode(node, request).thenAccept();
             }
+        }
+    }
+
+    private void coordinateRequest(final ByteBuffer key,
+                                   final String replicas,
+                                   final HttpSession session,
+                                   final Request request) {
+
+        request.addHeader(MEAT_BAG_CHECK + "true");
+
+        int count = Character.getNumericValue(replicas.charAt(0));
+
+        for (int i = 0; i < count; i++) {
+            final String node = topology.findNextNode(key, i + 1);
+            sendResponse(session, () -> sendToNode(node, request));
         }
     }
 
@@ -216,12 +243,9 @@ public class ServiceImpl extends HttpServer implements Service {
         }
     }
 
-    private Response sendToNode(final String node, final Request request) throws IOException {
-        try {
-            return nodes.get(node).invoke(request, 100);
-        } catch (InterruptedException | PoolException | IOException | HttpException e) {
-            throw new IOException("proxy troubles", e);
-        }
+    private CompletableFuture<HttpResponse<byte[]>> sendToNode(final String node, final Request request) {
+        return client.sendAsync(nodes.get(node),
+                HttpResponse.BodyHandlers.ofByteArray());
     }
 
     @Override

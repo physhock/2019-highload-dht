@@ -12,5 +12,7 @@ public interface Topology<T> {
 
     T calculateFor(final ByteBuffer key);
 
+    T findNextNode(final ByteBuffer key, final int offset);
+
     Set<T> all();
 }
