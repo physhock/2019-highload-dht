@@ -11,6 +11,7 @@ import one.nio.http.RequestMethod;
 import one.nio.http.Response;
 import one.nio.net.Socket;
 import one.nio.server.AcceptorConfig;
+import one.nio.util.Utf8;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,7 +30,10 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -43,7 +47,7 @@ public class ServiceImpl extends HttpServer implements Service {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     private static final Response BAD_REQUEST = new Response(Response.BAD_REQUEST, Response.EMPTY);
-    private static final String MEAT_BAG_CHECK = "Request from node";
+    private static final String SKYNET_CHECK = "Request from node";
     private final DAO dao;
     private final Executor executor;
     private final Topology<String> topology;
@@ -114,9 +118,10 @@ public class ServiceImpl extends HttpServer implements Service {
         if (id.isBlank()) {
             sendResponse(session, () -> BAD_REQUEST);
         } else {
+            final String s = convertRequestMethod(request);
             final ByteBuffer key = ByteBuffer.wrap(id.getBytes(Charsets.UTF_8));
             final String node = topology.calculateFor(key);
-            if (topology.isMe(node) && "true".equals(request.getHeader(MEAT_BAG_CHECK))) {
+            if (topology.isMe(node) && "true".equals(request.getHeader(SKYNET_CHECK))) {
                 switch (request.getMethod()) {
                     case Request.METHOD_GET:
                         sendResponse(session, () -> getData(key));
@@ -131,14 +136,41 @@ public class ServiceImpl extends HttpServer implements Service {
                         sendResponse(session, () -> BAD_REQUEST);
                         break;
                 }
-            } else if (topology.isMe(node) && request.getHeader(MEAT_BAG_CHECK) == null) {
-                coordinateRequest(key,
+            } else if (topology.isMe(node) && request.getHeader(SKYNET_CHECK) == null) {
+                coordinateRequest(
+                        key,
                         Optional.ofNullable(replicas).orElse("2/3"),
-                        session, request);
+                        session,
+                        request);
             } else {
-                sendToNode(node, request).thenAccept();
+                sendToNode(node, request)
+                        .thenApply(this::convertHttpResponse)
+                        .thenAccept(response -> sendResponse(session, () -> response));
             }
         }
+    }
+
+    private Response convertHttpResponse(final HttpResponse<byte[]> httpResponse) {
+        return new Response(String.valueOf(httpResponse.statusCode()), httpResponse.body());
+    }
+
+    private HttpRequest convertRequest(final Request request, final String node) {
+        return HttpRequest.newBuilder()
+                .header(SKYNET_CHECK, "true")
+                .headers(request.getHeaders())
+                .method(convertRequestMethod(request), request.getBody() == null
+                        ? HttpRequest.BodyPublishers.noBody()
+                        : HttpRequest.BodyPublishers.ofByteArray(request.getBody()))
+                .uri(URI.create(node)).build();
+    }
+
+    private String convertRequestMethod(Request request) {
+        final byte[] bytes = request.toBytes();
+        final int length = Utf8.length(request.getURI()) + 13 + request.getHeaderCount() * 2;
+        final String[] headers = request.getHeaders();
+        final int sum = Arrays.stream(headers).mapToInt(String::length).sum();
+
+        return Utf8.read(bytes, 0, bytes.length - (sum + length));
     }
 
     private void coordinateRequest(final ByteBuffer key,
@@ -146,15 +178,30 @@ public class ServiceImpl extends HttpServer implements Service {
                                    final HttpSession session,
                                    final Request request) {
 
-        request.addHeader(MEAT_BAG_CHECK + "true");
 
-        int count = Character.getNumericValue(replicas.charAt(0));
+        final int count = Character.getNumericValue(replicas.charAt(0));
+        final List<CompletableFuture<HttpResponse<byte[]>>> responses = new ArrayList<>();
 
+        //put
         for (int i = 0; i < count; i++) {
             final String node = topology.findNextNode(key, i + 1);
-            sendResponse(session, () -> sendToNode(node, request));
+            responses.add(sendToNode(node, request));
         }
+
+
+//        responses.stream().forEach(response -> {
+//            CompletableFuture.
+//                    response.thenApply(httpResponse -> {
+//                if (httpResponse.statusCode())
+//            })
+//        });
     }
+
+    private void handleResponses(final int count) {
+
+
+    }
+
 
     private void sendResponse(final HttpSession session, final MethodHandler method) {
         executor.execute(() -> {
@@ -244,7 +291,7 @@ public class ServiceImpl extends HttpServer implements Service {
     }
 
     private CompletableFuture<HttpResponse<byte[]>> sendToNode(final String node, final Request request) {
-        return client.sendAsync(nodes.get(node),
+        return client.sendAsync(convertRequest(request, String.valueOf(request.getMethod())),
                 HttpResponse.BodyHandlers.ofByteArray());
     }
 
