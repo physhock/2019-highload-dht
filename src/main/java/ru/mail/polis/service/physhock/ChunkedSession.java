@@ -14,10 +14,10 @@ import java.util.Iterator;
 
 public class ChunkedSession extends HttpSession {
 
-    private Iterator<Record> iterator;
     private static final byte[] RN = "\r\n".getBytes(Charsets.UTF_8);
     private static final byte[] N = "\n".getBytes(Charsets.UTF_8);
     private static final byte[] EMPTY = "0\r\n\r\n".getBytes(Charsets.UTF_8);
+    private Iterator<Record> iterator;
 
     public ChunkedSession(final Socket socket, final HttpServer server) {
         super(socket, server);

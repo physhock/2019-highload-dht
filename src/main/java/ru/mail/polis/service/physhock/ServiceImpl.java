@@ -35,11 +35,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 /**
@@ -54,7 +56,6 @@ public class ServiceImpl extends HttpServer implements Service {
     private final Executor executor;
     private final Topology<String> topology;
     private final HttpClient client;
-    private final Map<String, HttpRequest> nodes;
 
     /**
      * Server constructor.
@@ -74,11 +75,6 @@ public class ServiceImpl extends HttpServer implements Service {
         this.executor = executor;
         this.client = client;
         this.topology = topology;
-        this.nodes = topology
-                .all()
-                .stream()
-                .collect(Collectors.toMap(node -> node, node ->
-                        HttpRequest.newBuilder().uri(URI.create(node)).build()));
     }
 
     @NotNull
@@ -120,10 +116,9 @@ public class ServiceImpl extends HttpServer implements Service {
         if (id.isBlank()) {
             sendResponse(session, () -> BAD_REQUEST);
         } else {
-            final String s = convertRequestMethod(request);
             final ByteBuffer key = ByteBuffer.wrap(id.getBytes(Charsets.UTF_8));
             final String node = topology.calculateFor(key);
-            if (topology.isMe(node) && " True".equals(request.getHeader(SKYNET_CHECK + ":"))) {
+            if (" True".equals(request.getHeader(SKYNET_CHECK + ":"))) {
                 switch (request.getMethod()) {
                     case Request.METHOD_GET:
                         sendResponse(session, () -> getData(key));
@@ -168,10 +163,11 @@ public class ServiceImpl extends HttpServer implements Service {
 
     private String convertRequestMethod(Request request) {
         final byte[] bytes = request.toBytes();
+        final int bodyLength = request.getBody() == null ? 0 : request.getBody().length;
         final int length = Utf8.length(request.getURI())
                 + 13
                 + request.getHeaderCount() * 2
-                + request.getBody().length
+                + bodyLength
                 + 1;
         return Utf8.read(bytes, 0,
                 bytes.length - (Arrays.stream(request.getHeaders())
@@ -195,17 +191,27 @@ public class ServiceImpl extends HttpServer implements Service {
             responses.add(sendToNode(node, request));
         }
 
+
+        
         final CompletableFuture[] completableFutures = {responses.get(0), responses.get(1)};
 
         switch (request.getMethod()) {
             case Request.METHOD_GET:
-                CompletableFuture.allOf(completableFutures)
+                CompletableFuture.anyOf(completableFutures)
                         .thenApply(future -> responses.stream()
-                                .map(CompletableFuture::join)
+                                .filter(CompletableFuture::isDone)
+                                .map(responseCompletableFuture -> {
+                                    try {
+                                        return responseCompletableFuture.get(10, TimeUnit.SECONDS);
+                                    } catch (InterruptedException | ExecutionException | TimeoutException e) {
+                                        e.printStackTrace();
+                                        return new Response(Response.INTERNAL_ERROR, Response.EMPTY);
+                                    }
+                                })
                                 .collect(Collectors.toList()))
                         .thenAccept(list -> {
                             if (list.stream().filter(response -> response.getStatus() == 200).count() >= ack) {
-                                sendResponse(session, () -> new Response(Response.OK, Response.EMPTY));
+                                sendResponse(session, () -> new Response(Response.OK, list.get(0).getBody()));
                             } else if (list.stream().filter(response -> response.getStatus() == 404).count() == ack) {
                                 sendResponse(session, () -> new Response(Response.NOT_FOUND, Response.EMPTY));
                             } else {
@@ -214,9 +220,17 @@ public class ServiceImpl extends HttpServer implements Service {
                         });
                 break;
             case Request.METHOD_PUT:
-                CompletableFuture.anyOf(completableFutures)
+                CompletableFuture.allOf(completableFutures)
                         .thenApply(future -> responses.stream()
-                                .map(CompletableFuture::join)
+                                .filter(CompletableFuture::isDone)
+                                .map(responseCompletableFuture -> {
+                                    try {
+                                        return responseCompletableFuture.get(10, TimeUnit.SECONDS);
+                                    } catch (InterruptedException | ExecutionException | TimeoutException e) {
+                                        e.printStackTrace();
+                                        return new Response(Response.INTERNAL_ERROR, Response.EMPTY);
+                                    }
+                                })
                                 .collect(Collectors.toList()))
                         .thenAccept(list -> {
                             if (list.stream().filter(response -> response.getStatus() == 201).count() >= ack) {
