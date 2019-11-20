@@ -66,7 +66,7 @@ public final class ServiceFactory {
         final ExecutorService service = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors(),
                 new ThreadFactoryBuilder().setNameFormat("slave-%d").build());
         final Topology<String> simpleOne = new SimpleTopology("http://localhost:" + port, topology);
-        final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build();
+        final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
         return new ServiceImpl(port, dao, service, client, simpleOne);
     }

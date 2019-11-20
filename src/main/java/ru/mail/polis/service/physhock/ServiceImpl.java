@@ -36,7 +36,6 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
@@ -51,11 +50,15 @@ public class ServiceImpl extends HttpServer implements Service {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     private static final Response BAD_REQUEST = new Response(Response.BAD_REQUEST, Response.EMPTY);
-    private static final String SKYNET_CHECK = "Request-from-node";
+    private static final Response NOT_ENOUGH_REPLICAS =
+            new Response("504 Not Enough Replicas", Response.EMPTY);
+
+    private static final String PROXIED_REQUEST = "Request-from-node";
     private final DAO dao;
     private final Executor executor;
     private final Topology<String> topology;
     private final HttpClient client;
+    private final RequestCoordinator requestCoordinator;
 
     /**
      * Server constructor.
@@ -75,6 +78,8 @@ public class ServiceImpl extends HttpServer implements Service {
         this.executor = executor;
         this.client = client;
         this.topology = topology;
+
+        this.requestCoordinator = new RequestCoordinator();
     }
 
     @NotNull
@@ -118,7 +123,7 @@ public class ServiceImpl extends HttpServer implements Service {
         } else {
             final ByteBuffer key = ByteBuffer.wrap(id.getBytes(Charsets.UTF_8));
             final String node = topology.calculateFor(key);
-            if (" True".equals(request.getHeader(SKYNET_CHECK + ":"))) {
+            if (" True".equals(request.getHeader(PROXIED_REQUEST + ":"))) {
                 switch (request.getMethod()) {
                     case Request.METHOD_GET:
                         sendResponse(session, () -> getData(key));
@@ -133,15 +138,10 @@ public class ServiceImpl extends HttpServer implements Service {
                         sendResponse(session, () -> BAD_REQUEST);
                         break;
                 }
-            } else if (topology.isMe(node) && request.getHeader(SKYNET_CHECK) == null) {
-                coordinateRequest(
-                        key,
-                        Optional.ofNullable(replicas).orElse("2/3"),
-                        session,
-                        request);
+            } else if (topology.isMe(node)) {
+                requestCoordinator.processRequest(key, replicas, request, session);
             } else {
-                sendToNode(node, request)
-                        .thenAccept(response -> sendResponse(session, () -> response));
+                sendToNode(node, request).thenAccept(response -> sendResponse(session, () -> response));
             }
         }
     }
@@ -153,7 +153,7 @@ public class ServiceImpl extends HttpServer implements Service {
     private HttpRequest convertRequest(final Request request, final String node) {
         return HttpRequest.newBuilder()
                 .timeout(Duration.ofSeconds(10))
-                .header(SKYNET_CHECK, "True")
+                .header(PROXIED_REQUEST, "True")
                 .method(convertRequestMethod(request),
                         request.getBody() == null
                                 ? HttpRequest.BodyPublishers.noBody()
@@ -174,73 +174,6 @@ public class ServiceImpl extends HttpServer implements Service {
                         .filter(Objects::nonNull)
                         .mapToInt(String::length)
                         .sum() + length));
-    }
-
-    private void coordinateRequest(final ByteBuffer key,
-                                   final String replicas,
-                                   final HttpSession session,
-                                   final Request request) {
-
-
-        final int ack = Character.getNumericValue(replicas.charAt(0));
-        final int from = Character.getNumericValue(replicas.charAt(2));
-        final List<CompletableFuture<Response>> responses = new ArrayList<>();
-
-        for (int i = 0; i < from; i++) {
-            final String node = topology.findNextNode(key, i + 1);
-            responses.add(sendToNode(node, request));
-        }
-
-
-        
-        final CompletableFuture[] completableFutures = {responses.get(0), responses.get(1)};
-
-        switch (request.getMethod()) {
-            case Request.METHOD_GET:
-                CompletableFuture.anyOf(completableFutures)
-                        .thenApply(future -> responses.stream()
-                                .filter(CompletableFuture::isDone)
-                                .map(responseCompletableFuture -> {
-                                    try {
-                                        return responseCompletableFuture.get(10, TimeUnit.SECONDS);
-                                    } catch (InterruptedException | ExecutionException | TimeoutException e) {
-                                        e.printStackTrace();
-                                        return new Response(Response.INTERNAL_ERROR, Response.EMPTY);
-                                    }
-                                })
-                                .collect(Collectors.toList()))
-                        .thenAccept(list -> {
-                            if (list.stream().filter(response -> response.getStatus() == 200).count() >= ack) {
-                                sendResponse(session, () -> new Response(Response.OK, list.get(0).getBody()));
-                            } else if (list.stream().filter(response -> response.getStatus() == 404).count() == ack) {
-                                sendResponse(session, () -> new Response(Response.NOT_FOUND, Response.EMPTY));
-                            } else {
-                                sendResponse(session, () -> new Response(Response.GATEWAY_TIMEOUT, Response.EMPTY));
-                            }
-                        });
-                break;
-            case Request.METHOD_PUT:
-                CompletableFuture.allOf(completableFutures)
-                        .thenApply(future -> responses.stream()
-                                .filter(CompletableFuture::isDone)
-                                .map(responseCompletableFuture -> {
-                                    try {
-                                        return responseCompletableFuture.get(10, TimeUnit.SECONDS);
-                                    } catch (InterruptedException | ExecutionException | TimeoutException e) {
-                                        e.printStackTrace();
-                                        return new Response(Response.INTERNAL_ERROR, Response.EMPTY);
-                                    }
-                                })
-                                .collect(Collectors.toList()))
-                        .thenAccept(list -> {
-                            if (list.stream().filter(response -> response.getStatus() == 201).count() >= ack) {
-                                sendResponse(session, () -> new Response(Response.CREATED, Response.EMPTY));
-                            } else {
-                                sendResponse(session, () -> new Response(Response.GATEWAY_TIMEOUT, Response.EMPTY));
-                            }
-                        });
-                break;
-        }
     }
 
     private void sendResponse(final HttpSession session, final MethodHandler method) {
@@ -331,9 +264,11 @@ public class ServiceImpl extends HttpServer implements Service {
     }
 
     private CompletableFuture<Response> sendToNode(final String node, final Request request) {
-        final HttpRequest request1 = convertRequest(request, node);
-        return client.sendAsync(request1,
-                HttpResponse.BodyHandlers.ofByteArray()).thenApply(this::convertHttpResponse);
+        return client.sendAsync(convertRequest(request, node),
+                HttpResponse.BodyHandlers.ofByteArray())
+                .handle((response, exception) -> exception == null
+                        ? convertHttpResponse(response)
+                        : new Response(Response.INTERNAL_ERROR + topology.isMe(node), Response.EMPTY));
     }
 
     @Override
@@ -349,5 +284,98 @@ public class ServiceImpl extends HttpServer implements Service {
     @FunctionalInterface
     private interface MethodHandler {
         Response handle() throws IOException;
+    }
+
+    private class RequestCoordinator {
+
+        private List<CompletableFuture<Response>> sendRequest(final int from,
+                                                              final ByteBuffer key,
+                                                              final Request request) {
+            final List<CompletableFuture<Response>> responses = new ArrayList<>();
+            for (int i = 0; i < from; i++) {
+                final String node = topology.findNextNode(key, i + 1);
+                responses.add(sendToNode(node, request));
+            }
+            // todo fix me "1/1"
+            return responses;
+        }
+
+        void processRequest(final ByteBuffer key,
+                            final String replicas,
+                            final Request request,
+                            final HttpSession session) {
+            final int ack = Character.getNumericValue(replicas.charAt(0));
+            final int from = Character.getNumericValue(replicas.charAt(2));
+
+            final List<CompletableFuture[]> combinedFutures = combineFutures(sendRequest(from, key, request), ack);
+
+            final CompletableFuture<List<Response>> futureResponseList =
+                    CompletableFuture.anyOf(combinedFutures.stream()
+                            .map(CompletableFuture::allOf)
+                            .toArray(CompletableFuture[]::new))
+                            .thenApply(future -> Arrays.stream(combinedFutures.stream()
+                                    .filter(array -> CompletableFuture.allOf(array).isDone())
+                                    .findFirst().orElseThrow()).map(this::getResponse).collect(Collectors.toList()));
+
+            switch (request.getMethod()) {
+                case Request.METHOD_GET:
+                    futureResponseList.thenAccept(responseList -> {
+                        if (responseList.stream()
+                                .filter(response -> response.getStatus() == 200)
+                                .count() >= ack) {
+                            new Response(Response.OK, responseList.get(0).getBody());
+                        } else if (responseList.stream()
+                                .filter(response -> response.getStatus() == 404)
+                                .count() == ack) {
+                            sendResponse(session, () -> new Response(Response.NOT_FOUND, Response.EMPTY));
+                        } else {
+                            // todo is it reachable? bad if not so
+                            sendResponse(session, () -> NOT_ENOUGH_REPLICAS);
+                        }
+                    });
+                    break;
+                case Request.METHOD_PUT:
+                    futureResponseList.thenAccept(responseList -> {
+                        if (responseList.stream()
+                                .filter(response -> response.getStatus() == 201)
+                                .count() >= ack) {
+                            sendResponse(session, () -> new Response(Response.CREATED, Response.EMPTY));
+                        } else {
+                            sendResponse(session, () -> NOT_ENOUGH_REPLICAS);
+                        }
+                    });
+                    break;
+            }
+        }
+
+        private Response getResponse(final CompletableFuture<Response> responseCompletableFuture) {
+            try {
+                return responseCompletableFuture.get(10, TimeUnit.SECONDS);
+            } catch (InterruptedException | ExecutionException | TimeoutException e) {
+                e.printStackTrace();
+                return new Response(Response.INTERNAL_ERROR, Response.EMPTY);
+            }
+        }
+
+        private List<CompletableFuture[]> combineFutures(final List<CompletableFuture<Response>> futures, final int ack) {
+            List<CompletableFuture[]> combinations = new ArrayList<>();
+            helper(combinations, futures, new CompletableFuture[ack], 0, futures.size() - 1, 0);
+            return combinations;
+        }
+
+        private void helper(final List<CompletableFuture[]> combinations,
+                            final List<CompletableFuture<Response>> futures,
+                            final CompletableFuture[] data,
+                            final int start, final int end, final int index) {
+            if (index == data.length) {
+                CompletableFuture[] combination = data.clone();
+                combinations.add(combination);
+            } else if (start <= end) {
+                data[index] = futures.get(start);
+                helper(combinations, futures, data, start + 1, end, index + 1);
+                helper(combinations, futures, data, start + 1, end, index);
+            }
+        }
+
     }
 }
