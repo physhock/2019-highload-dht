@@ -360,7 +360,8 @@ class ThreeNodeTest extends ClusterTestBase {
             start(0, storage0);
 
             // Check node 0
-            if (get(0, key, 1, 2).getStatus() == 200) {
+            final Response response2 = get(0, key, 1, 2);
+            if (response2.getStatus() == 200) {
                 copies++;
             }
 
@@ -372,7 +373,8 @@ class ThreeNodeTest extends ClusterTestBase {
             start(1, storage1);
 
             // Check node 1
-            if (get(1, key, 1, 2).getStatus() == 200) {
+            final Response response1 = get(1, key, 1, 2);
+            if (response1.getStatus() == 200) {
                 copies++;
             }
 
@@ -384,7 +386,8 @@ class ThreeNodeTest extends ClusterTestBase {
             start(2, storage2);
 
             // Check node 2
-            if (get(2, key, 1, 2).getStatus() == 200) {
+            final Response response = get(2, key, 1, 2);
+            if (response.getStatus() == 200) {
                 copies++;
             }
 

@@ -122,7 +122,6 @@ public class ServiceImpl extends HttpServer implements Service {
             sendResponse(session, () -> BAD_REQUEST);
         } else {
             final ByteBuffer key = ByteBuffer.wrap(id.getBytes(Charsets.UTF_8));
-            final String node = topology.calculateFor(key);
             if (" True".equals(request.getHeader(PROXIED_REQUEST + ":"))) {
                 switch (request.getMethod()) {
                     case Request.METHOD_GET:
@@ -138,10 +137,12 @@ public class ServiceImpl extends HttpServer implements Service {
                         sendResponse(session, () -> BAD_REQUEST);
                         break;
                 }
-            } else if (topology.isMe(node)) {
-                requestCoordinator.processRequest(key, replicas, request, session);
             } else {
-                sendToNode(node, request).thenAccept(response -> sendResponse(session, () -> response));
+                if (replicas.charAt(0) != '0' && replicas.charAt(0) <= replicas.charAt(2)) {
+                    requestCoordinator.processRequest(key, replicas, request, session);
+                } else {
+                    sendResponse(session, () -> BAD_REQUEST);
+                }
             }
         }
     }
@@ -293,7 +294,7 @@ public class ServiceImpl extends HttpServer implements Service {
                                                               final Request request) {
             final List<CompletableFuture<Response>> responses = new ArrayList<>();
             for (int i = 0; i < from; i++) {
-                final String node = topology.findNextNode(key, i + 1);
+                final String node = topology.findNextNode(key, i);
                 responses.add(sendToNode(node, request));
             }
             // todo fix me "1/1"
@@ -323,7 +324,7 @@ public class ServiceImpl extends HttpServer implements Service {
                         if (responseList.stream()
                                 .filter(response -> response.getStatus() == 200)
                                 .count() >= ack) {
-                            new Response(Response.OK, responseList.get(0).getBody());
+                            sendResponse(session, () -> new Response(Response.OK, responseList.get(0).getBody()));
                         } else if (responseList.stream()
                                 .filter(response -> response.getStatus() == 404)
                                 .count() == ack) {
@@ -345,6 +346,17 @@ public class ServiceImpl extends HttpServer implements Service {
                         }
                     });
                     break;
+                case Request.METHOD_DELETE:
+                    futureResponseList.thenAccept(responseList -> {
+                        if (responseList.stream()
+                                .filter(response -> response.getStatus() == 201)
+                                .count() >= ack) {
+                            sendResponse(session, () -> new Response(Response.ACCEPTED, Response.EMPTY));
+                        } else {
+                            sendResponse(session, () -> NOT_ENOUGH_REPLICAS);
+                        }
+                    });
+                    break;
             }
         }
 
@@ -357,7 +369,8 @@ public class ServiceImpl extends HttpServer implements Service {
             }
         }
 
-        private List<CompletableFuture[]> combineFutures(final List<CompletableFuture<Response>> futures, final int ack) {
+        private List<CompletableFuture[]> combineFutures(final List<CompletableFuture<Response>> futures,
+                                                         final int ack) {
             List<CompletableFuture[]> combinations = new ArrayList<>();
             helper(combinations, futures, new CompletableFuture[ack], 0, futures.size() - 1, 0);
             return combinations;
