@@ -310,6 +310,15 @@ public class ServiceImpl extends HttpServer implements Service {
 
             final List<CompletableFuture[]> combinedFutures = combineFutures(sendRequest(from, key, request), ack);
 
+//            final CompletableFuture<List<List<Response>>> futureResponseList = CompletableFuture.anyOf(
+//                    combinedFutures.stream()
+//                            .map(CompletableFuture::allOf)
+//                            .toArray(CompletableFuture[]::new))
+//                    .thenApply(future -> combinedFutures.stream()
+//                            .filter(array -> CompletableFuture.allOf(array).isDone())
+//                            .map(array -> Arrays.stream(array).map(this::getResponse).collect(Collectors.toList()))
+//                            .collect(Collectors.toList()));
+
             final CompletableFuture<List<Response>> futureResponseList =
                     CompletableFuture.anyOf(combinedFutures.stream()
                             .map(CompletableFuture::allOf)
@@ -322,24 +331,23 @@ public class ServiceImpl extends HttpServer implements Service {
                 case Request.METHOD_GET:
                     futureResponseList.thenAccept(responseList -> {
                         if (responseList.stream()
-                                .filter(response -> response.getStatus() == 200)
-                                .count() >= ack) {
-                            sendResponse(session, () -> new Response(Response.OK, responseList.get(0).getBody()));
+                                .anyMatch(response -> response.getStatus() == 500)) {
+                            sendResponse(session, () -> NOT_ENOUGH_REPLICAS);
                         } else if (responseList.stream()
-                                .filter(response -> response.getStatus() == 404)
-                                .count() == ack) {
+                                .allMatch(response -> response.getStatus() == 404)) {
                             sendResponse(session, () -> new Response(Response.NOT_FOUND, Response.EMPTY));
                         } else {
-                            // todo is it reachable? bad if not so
-                            sendResponse(session, () -> NOT_ENOUGH_REPLICAS);
+                            sendResponse(session, () -> responseList.stream()
+                                    .filter(response -> response.getStatus() == 200)
+                                    .findFirst()
+                                    .orElse(new Response(Response.INTERNAL_ERROR, Response.EMPTY)));
                         }
                     });
                     break;
                 case Request.METHOD_PUT:
                     futureResponseList.thenAccept(responseList -> {
                         if (responseList.stream()
-                                .filter(response -> response.getStatus() == 201)
-                                .count() >= ack) {
+                                .allMatch(response -> response.getStatus() == 201)) {
                             sendResponse(session, () -> new Response(Response.CREATED, Response.EMPTY));
                         } else {
                             sendResponse(session, () -> NOT_ENOUGH_REPLICAS);
@@ -349,8 +357,7 @@ public class ServiceImpl extends HttpServer implements Service {
                 case Request.METHOD_DELETE:
                     futureResponseList.thenAccept(responseList -> {
                         if (responseList.stream()
-                                .filter(response -> response.getStatus() == 201)
-                                .count() >= ack) {
+                                .allMatch(response -> response.getStatus() == 202)) {
                             sendResponse(session, () -> new Response(Response.ACCEPTED, Response.EMPTY));
                         } else {
                             sendResponse(session, () -> NOT_ENOUGH_REPLICAS);
