@@ -19,6 +19,7 @@ package ru.mail.polis.dao;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import ru.mail.polis.Record;
+import ru.mail.polis.dao.physhock.RocksRecord;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -69,6 +70,7 @@ public interface DAO extends Closeable {
      * Obtains {@link Record} corresponding to given key.
      *
      * @throws NoSuchElementException if no such record
+     * @return
      */
     @NotNull
     default ByteBuffer get(@NotNull ByteBuffer key) throws IOException, NoSuchElementException {

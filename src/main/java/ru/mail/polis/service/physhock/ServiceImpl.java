@@ -19,6 +19,7 @@ import ru.mail.polis.Record;
 import ru.mail.polis.dao.DAO;
 import ru.mail.polis.dao.physhock.ByteBufferUtils;
 import ru.mail.polis.dao.physhock.NoSuchElementExceptionLite;
+import ru.mail.polis.dao.physhock.RocksRecord;
 import ru.mail.polis.service.Service;
 
 import java.io.IOException;
@@ -269,7 +270,7 @@ public class ServiceImpl extends HttpServer implements Service {
                 HttpResponse.BodyHandlers.ofByteArray())
                 .handle((response, exception) -> exception == null
                         ? convertHttpResponse(response)
-                        : new Response(Response.INTERNAL_ERROR + topology.isMe(node), Response.EMPTY));
+                        : new Response(Response.INTERNAL_ERROR, Response.EMPTY));
     }
 
     @Override
@@ -297,7 +298,6 @@ public class ServiceImpl extends HttpServer implements Service {
                 final String node = topology.findNextNode(key, i);
                 responses.add(sendToNode(node, request));
             }
-            // todo fix me "1/1"
             return responses;
         }
 
@@ -309,15 +309,6 @@ public class ServiceImpl extends HttpServer implements Service {
             final int from = Character.getNumericValue(replicas.charAt(2));
 
             final List<CompletableFuture[]> combinedFutures = combineFutures(sendRequest(from, key, request), ack);
-
-//            final CompletableFuture<List<List<Response>>> futureResponseList = CompletableFuture.anyOf(
-//                    combinedFutures.stream()
-//                            .map(CompletableFuture::allOf)
-//                            .toArray(CompletableFuture[]::new))
-//                    .thenApply(future -> combinedFutures.stream()
-//                            .filter(array -> CompletableFuture.allOf(array).isDone())
-//                            .map(array -> Arrays.stream(array).map(this::getResponse).collect(Collectors.toList()))
-//                            .collect(Collectors.toList()));
 
             final CompletableFuture<List<Response>> futureResponseList =
                     CompletableFuture.anyOf(combinedFutures.stream()
@@ -334,13 +325,25 @@ public class ServiceImpl extends HttpServer implements Service {
                                 .anyMatch(response -> response.getStatus() == 500)) {
                             sendResponse(session, () -> NOT_ENOUGH_REPLICAS);
                         } else if (responseList.stream()
-                                .allMatch(response -> response.getStatus() == 404)) {
+                                .allMatch(response -> response.getStatus() == 404) ||
+                                responseList.stream()
+                                        .anyMatch(response ->
+                                                RocksRecord.fromByteBuffer(
+                                                        ByteBuffer.wrap(response.getBody())).isDead())) {
                             sendResponse(session, () -> new Response(Response.NOT_FOUND, Response.EMPTY));
                         } else {
-                            sendResponse(session, () -> responseList.stream()
-                                    .filter(response -> response.getStatus() == 200)
-                                    .findFirst()
-                                    .orElse(new Response(Response.INTERNAL_ERROR, Response.EMPTY)));
+
+                            sendResponse(session, () -> new Response(Response.OK, Response.EMPTY));
+
+//                            sendResponse(session, () -> {
+//
+//                                final Response response1 = responseList.stream()
+//                                        .filter(response -> response.getStatus() == 200)
+//                                        .findFirst().get();
+//
+//                                return new Response(Response.OK, ByteBufferUtils.getByteArray(
+//                                        RocksRecord.fromByteBuffer(ByteBuffer.wrap(response1.getBody())).getData()));
+//                            });
                         }
                     });
                     break;

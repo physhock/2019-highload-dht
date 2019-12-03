@@ -47,7 +47,19 @@ public class DAOImpl implements DAO {
         return new Iterator<>() {
             @Override
             public boolean hasNext() {
+                skip();
                 return iterator.isValid();
+            }
+
+            private void skip() {
+                while (iterator.isValid()) {
+                    final byte[] value = iterator.value();
+                    final RocksRecord record = RocksRecord.fromByteBuffer(ByteBuffer.wrap(value));
+                    if (!record.isDead()) {
+                        break;
+                    }
+                    iterator.next();
+                }
             }
 
             @Override
@@ -57,8 +69,10 @@ public class DAOImpl implements DAO {
                 }
                 final ByteBuffer key = ByteBufferUtils.shiftByteArray(iterator.key());
                 final ByteBuffer value = ByteBuffer.wrap(iterator.value());
-                final Record record = Record.of(key, value);
+                final RocksRecord rocksRecord = RocksRecord.fromByteBuffer(value);
+                final Record record = Record.of(key, rocksRecord.getData());
                 iterator.next();
+                skip();
                 return record;
             }
         };
@@ -80,7 +94,8 @@ public class DAOImpl implements DAO {
     @Override
     public void upsert(@NotNull final ByteBuffer key, @NotNull final ByteBuffer value) throws IOException {
         try {
-            rocksDB.put(ByteBufferUtils.restoreByteArray(key), ByteBufferUtils.getByteArray(value));
+            rocksDB.put(ByteBufferUtils.restoreByteArray(key),
+                    new RocksRecord(value, System.currentTimeMillis(), false).toByteArray());
         } catch (RocksDBException e) {
             throw new IOException(ROCK, e);
         }
@@ -89,7 +104,8 @@ public class DAOImpl implements DAO {
     @Override
     public void remove(@NotNull final ByteBuffer key) throws IOException {
         try {
-            rocksDB.delete(ByteBufferUtils.restoreByteArray(key));
+            rocksDB.put(ByteBufferUtils.restoreByteArray(key),
+                    new RocksRecord(ByteBuffer.allocate(0), System.currentTimeMillis(), true).toByteArray());
         } catch (RocksDBException e) {
             throw new IOException(ROCK, e);
         }
