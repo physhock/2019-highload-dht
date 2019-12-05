@@ -54,7 +54,7 @@ public class DAOImpl implements DAO {
             private void skip() {
                 while (iterator.isValid()) {
                     final byte[] value = iterator.value();
-                    final RocksRecord record = RocksRecord.fromByteBuffer(ByteBuffer.wrap(value));
+                    final RocksRecord record = RocksRecord.fromByteArray(value);
                     if (!record.isDead()) {
                         break;
                     }
@@ -64,6 +64,7 @@ public class DAOImpl implements DAO {
 
             @Override
             public Record next() {
+                skip();
                 if (!hasNext()) {
                     throw new NoSuchElementException("Next on empty iterator");
                 }
@@ -82,10 +83,11 @@ public class DAOImpl implements DAO {
     @Override
     public ByteBuffer get(@NotNull final ByteBuffer key) throws IOException, NoSuchElementException {
         try {
-            return ByteBuffer.wrap(
+            return RocksRecord.fromByteArray(
                     Optional.ofNullable(rocksDB.get(ByteBufferUtils.restoreByteArray(key)))
                             .orElseThrow(() ->
-                                    new NoSuchElementExceptionLite("This is not the data you are looking for")));
+                                    new NoSuchElementExceptionLite("This is not the data you are looking for")))
+                    .getData();
         } catch (RocksDBException e) {
             throw new IOException(ROCK, e);
         }

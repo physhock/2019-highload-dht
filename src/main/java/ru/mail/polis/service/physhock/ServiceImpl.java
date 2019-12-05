@@ -79,7 +79,6 @@ public class ServiceImpl extends HttpServer implements Service {
         this.executor = executor;
         this.client = client;
         this.topology = topology;
-
         this.requestCoordinator = new RequestCoordinator();
     }
 
@@ -119,34 +118,40 @@ public class ServiceImpl extends HttpServer implements Service {
                               @Param(value = "replicas") final String replicas,
                               final HttpSession session,
                               final Request request) {
-        if (id.isBlank()) {
+        if (id.isBlank() || replicas.charAt(0) == '0' && replicas.charAt(0) > replicas.charAt(2)) {
             sendResponse(session, () -> BAD_REQUEST);
         } else {
             final ByteBuffer key = ByteBuffer.wrap(id.getBytes(Charsets.UTF_8));
             if (" True".equals(request.getHeader(PROXIED_REQUEST + ":"))) {
-                switch (request.getMethod()) {
-                    case Request.METHOD_GET:
-                        sendResponse(session, () -> getData(key));
-                        break;
-                    case Request.METHOD_PUT:
-                        sendResponse(session, () -> putData(key, request.getBody()));
-                        break;
-                    case Request.METHOD_DELETE:
-                        sendResponse(session, () -> deleteData(key));
-                        break;
-                    default:
-                        sendResponse(session, () -> BAD_REQUEST);
-                        break;
-                }
+                sendResponse(session, () -> completeRequest(request, key));
             } else {
-                if (replicas.charAt(0) != '0' && replicas.charAt(0) <= replicas.charAt(2)) {
-                    requestCoordinator.processRequest(key, replicas, request, session);
-                } else {
-                    sendResponse(session, () -> BAD_REQUEST);
-                }
+                requestCoordinator.processRequest(key, replicas, request, session);
             }
         }
     }
+
+    // TODO FIX KOLXOZ
+    private Response completeReques(final Request request, final ByteBuffer key) {
+        try {
+            return completeRequest(request, key);
+        } catch (IOException exception) {
+            return new Response(Response.INTERNAL_ERROR, Response.EMPTY);
+        }
+    }
+
+    private Response completeRequest(final Request request, final ByteBuffer key) throws IOException {
+        switch (request.getMethod()) {
+            case Request.METHOD_GET:
+                return getData(key);
+            case Request.METHOD_PUT:
+                return putData(key, request.getBody());
+            case Request.METHOD_DELETE:
+                return deleteData(key);
+            default:
+                return BAD_REQUEST;
+        }
+    }
+
 
     private Response convertHttpResponse(final HttpResponse<byte[]> httpResponse) {
         return new Response(String.valueOf(httpResponse.statusCode()), httpResponse.body());
@@ -154,7 +159,7 @@ public class ServiceImpl extends HttpServer implements Service {
 
     private HttpRequest convertRequest(final Request request, final String node) {
         return HttpRequest.newBuilder()
-                .timeout(Duration.ofSeconds(10))
+                .timeout(Duration.ofMillis(2000))
                 .header(PROXIED_REQUEST, "True")
                 .method(convertRequestMethod(request),
                         request.getBody() == null
@@ -266,11 +271,12 @@ public class ServiceImpl extends HttpServer implements Service {
     }
 
     private CompletableFuture<Response> sendToNode(final String node, final Request request) {
-        return client.sendAsync(convertRequest(request, node),
+        final HttpRequest request1 = convertRequest(request, node);
+        return client.sendAsync(request1,
                 HttpResponse.BodyHandlers.ofByteArray())
                 .handle((response, exception) -> exception == null
                         ? convertHttpResponse(response)
-                        : new Response(Response.INTERNAL_ERROR, Response.EMPTY));
+                        : new Response(Response.INTERNAL_ERROR + " " + topology.isMe(node), Response.EMPTY));
     }
 
     @Override
@@ -293,8 +299,11 @@ public class ServiceImpl extends HttpServer implements Service {
         private List<CompletableFuture<Response>> sendRequest(final int from,
                                                               final ByteBuffer key,
                                                               final Request request) {
+
             final List<CompletableFuture<Response>> responses = new ArrayList<>();
-            for (int i = 0; i < from; i++) {
+            responses.add(CompletableFuture.completedFuture(completeReques(request, key)));
+
+            for (int i = 1; i < from; i++) {
                 final String node = topology.findNextNode(key, i);
                 responses.add(sendToNode(node, request));
             }
@@ -308,7 +317,8 @@ public class ServiceImpl extends HttpServer implements Service {
             final int ack = Character.getNumericValue(replicas.charAt(0));
             final int from = Character.getNumericValue(replicas.charAt(2));
 
-            final List<CompletableFuture[]> combinedFutures = combineFutures(sendRequest(from, key, request), ack);
+            final List<CompletableFuture[]> combinedFutures =
+                    combineFutures(sendRequest(from - 1, key, request), ack);
 
             final CompletableFuture<List<Response>> futureResponseList =
                     CompletableFuture.anyOf(combinedFutures.stream()
@@ -328,23 +338,23 @@ public class ServiceImpl extends HttpServer implements Service {
                                 .allMatch(response -> response.getStatus() == 404) ||
                                 responseList.stream()
                                         .anyMatch(response ->
-                                                RocksRecord.fromByteBuffer(
-                                                        ByteBuffer.wrap(response.getBody())).isDead())) {
+                                                RocksRecord.fromByteArray(
+                                                        response.getBody()).isDead())) {
                             sendResponse(session, () -> new Response(Response.NOT_FOUND, Response.EMPTY));
                         } else {
 
-                            sendResponse(session, () -> new Response(Response.OK, Response.EMPTY));
+//                            sendResponse(session, () -> new Response(Response.OK, Response.EMPTY));
 
-//                            sendResponse(session, () -> {
-//
-//                                final Response response1 = responseList.stream()
-//                                        .filter(response -> response.getStatus() == 200)
-//                                        .findFirst().get();
-//
-//                                return new Response(Response.OK, ByteBufferUtils.getByteArray(
-//                                        RocksRecord.fromByteBuffer(ByteBuffer.wrap(response1.getBody())).getData()));
-//                            });
+                            sendResponse(session, () -> {
+
+                                final Response response1 = responseList.stream()
+                                        .filter(response -> response.getStatus() == 200)
+                                        .findFirst().get();
+
+                                return new Response(Response.OK, response1.getBody());
+                            });
                         }
+                        combinedFutures.size();
                     });
                     break;
                 case Request.METHOD_PUT:
@@ -374,7 +384,7 @@ public class ServiceImpl extends HttpServer implements Service {
             try {
                 return responseCompletableFuture.get(10, TimeUnit.SECONDS);
             } catch (InterruptedException | ExecutionException | TimeoutException e) {
-                e.printStackTrace();
+                log.error("getResponse error", e);
                 return new Response(Response.INTERNAL_ERROR, Response.EMPTY);
             }
         }

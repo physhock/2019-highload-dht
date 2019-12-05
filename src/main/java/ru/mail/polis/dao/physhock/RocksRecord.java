@@ -17,6 +17,11 @@ public class RocksRecord {
         this.dead = dead;
     }
 
+    public static RocksRecord fromByteArray(final byte[] array){
+        final ByteBuffer byteBuffer = ByteBuffer.wrap(array);
+        return fromByteBuffer(byteBuffer);
+    }
+
     public static RocksRecord fromByteBuffer(final ByteBuffer byteBuffer) {
         final char flag = byteBuffer.getChar();
         final long time = byteBuffer.getLong();
@@ -29,12 +34,12 @@ public class RocksRecord {
 
     public byte[] toByteArray() {
         return ByteBuffer.allocate(Character.BYTES + Long.BYTES + data.remaining())
-                .putChar(isDead() ? 'y' : 'n').putLong(timestamp).put(data).array();
+                .putChar(isDead() ? 'y' : 'n').putLong(timestamp).put(data.duplicate()).array();
     }
 
     public ByteBuffer getData() {
         if (isDead())
-            throw new IllegalArgumentException("Data is dead");
+            throw new NoSuchElementExceptionLite("Data is dead");
         return data;
     }
 
