@@ -175,9 +175,6 @@ class TwoNodeTest extends ClusterTestBase {
             storage1 = ServiceFactory.create(port1, dao1, endpoints);
             start(1, storage1);
 
-            // Help implementors with second precision for conflict resolution
-            Thread.sleep(TimeUnit.SECONDS.toMillis(2));
-
             // Check
             final Response response = get(1, key, 2, 2);
             assertEquals(200, response.getStatus());

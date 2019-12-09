@@ -52,8 +52,7 @@ class BasicTest extends TestBase {
         final ByteBuffer value = randomValueBuffer();
         try (DAO dao = DAOFactory.create(data)) {
             dao.upsert(key, value);
-            final ByteBuffer actual = dao.get(key);
-            assertEquals(value, actual);
+            assertEquals(value, dao.get(key));
             assertEquals(value, dao.get(key.duplicate()));
         }
     }

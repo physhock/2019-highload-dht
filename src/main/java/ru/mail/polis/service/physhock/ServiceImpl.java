@@ -19,7 +19,6 @@ import ru.mail.polis.Record;
 import ru.mail.polis.dao.DAO;
 import ru.mail.polis.dao.physhock.ByteBufferUtils;
 import ru.mail.polis.dao.physhock.NoSuchElementExceptionLite;
-import ru.mail.polis.dao.physhock.RocksRecord;
 import ru.mail.polis.service.Service;
 
 import java.io.IOException;
@@ -115,10 +114,12 @@ public class ServiceImpl extends HttpServer implements Service {
      */
     @Path("/v0/entity")
     public void entityHandler(@Param(value = "id", required = true) final String id,
-                              @Param(value = "replicas") final String replicas,
+                              @Param(value = "replicas") String replicas,
                               final HttpSession session,
                               final Request request) {
-        if (id.isBlank() || replicas.charAt(0) == '0' && replicas.charAt(0) > replicas.charAt(2)) {
+
+        replicas = replicas == null ? topology.all().size() / 2 + 1 + "/" + topology.all().size() : replicas;
+        if (id.isBlank() || replicas.charAt(0) == '0' || replicas.charAt(0) > replicas.charAt(2)) {
             sendResponse(session, () -> BAD_REQUEST);
         } else {
             final ByteBuffer key = ByteBuffer.wrap(id.getBytes(Charsets.UTF_8));
@@ -127,15 +128,6 @@ public class ServiceImpl extends HttpServer implements Service {
             } else {
                 requestCoordinator.processRequest(key, replicas, request, session);
             }
-        }
-    }
-
-    // TODO FIX KOLXOZ
-    private Response completeReques(final Request request, final ByteBuffer key) {
-        try {
-            return completeRequest(request, key);
-        } catch (IOException exception) {
-            return new Response(Response.INTERNAL_ERROR, Response.EMPTY);
         }
     }
 
@@ -210,7 +202,7 @@ public class ServiceImpl extends HttpServer implements Service {
             final ByteBuffer result = dao.get(key);
             return new Response(Response.OK, ByteBufferUtils.getByteArray(result));
         } catch (NoSuchElementExceptionLite e) {
-            return new Response(Response.NOT_FOUND, Response.EMPTY);
+            return new Response(Response.NOT_FOUND, e.getMessage().getBytes(Charset.defaultCharset()));
         }
     }
 
@@ -301,11 +293,18 @@ public class ServiceImpl extends HttpServer implements Service {
                                                               final Request request) {
 
             final List<CompletableFuture<Response>> responses = new ArrayList<>();
-            responses.add(CompletableFuture.completedFuture(completeReques(request, key)));
-
-            for (int i = 1; i < from; i++) {
+            for (int i = 0; i < from; i++) {
                 final String node = topology.findNextNode(key, i);
-                responses.add(sendToNode(node, request));
+                if (topology.isMe(node)) {
+                    try {
+                        responses.add(CompletableFuture.completedFuture(completeRequest(request, key)));
+                    } catch (IOException e) {
+                        responses.add(CompletableFuture.completedFuture(
+                                new Response(Response.INTERNAL_ERROR, Response.EMPTY)));
+                    }
+                } else {
+                    responses.add(sendToNode(node, request));
+                }
             }
             return responses;
         }
@@ -314,11 +313,9 @@ public class ServiceImpl extends HttpServer implements Service {
                             final String replicas,
                             final Request request,
                             final HttpSession session) {
-            final int ack = Character.getNumericValue(replicas.charAt(0));
-            final int from = Character.getNumericValue(replicas.charAt(2));
-
             final List<CompletableFuture[]> combinedFutures =
-                    combineFutures(sendRequest(from - 1, key, request), ack);
+                    combineFutures(sendRequest(Character.getNumericValue(replicas.charAt(2)), key, request),
+                            Character.getNumericValue(replicas.charAt(0)));
 
             final CompletableFuture<List<Response>> futureResponseList =
                     CompletableFuture.anyOf(combinedFutures.stream()
@@ -337,14 +334,10 @@ public class ServiceImpl extends HttpServer implements Service {
                         } else if (responseList.stream()
                                 .allMatch(response -> response.getStatus() == 404) ||
                                 responseList.stream()
-                                        .anyMatch(response ->
-                                                RocksRecord.fromByteArray(
-                                                        response.getBody()).isDead())) {
+                                        .anyMatch(response -> response.getBody().length != 0
+                                                && new String(response.getBody()).equals("Data is dead"))) {
                             sendResponse(session, () -> new Response(Response.NOT_FOUND, Response.EMPTY));
                         } else {
-
-//                            sendResponse(session, () -> new Response(Response.OK, Response.EMPTY));
-
                             sendResponse(session, () -> {
 
                                 final Response response1 = responseList.stream()
@@ -354,7 +347,6 @@ public class ServiceImpl extends HttpServer implements Service {
                                 return new Response(Response.OK, response1.getBody());
                             });
                         }
-                        combinedFutures.size();
                     });
                     break;
                 case Request.METHOD_PUT:
