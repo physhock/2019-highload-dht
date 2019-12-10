@@ -347,7 +347,7 @@ public class ServiceImpl extends HttpServer implements Service {
                             sendResponse(session, () -> new Response(Response.NOT_FOUND, Response.EMPTY));
                         } else {
                             sendResponse(session, () -> responseList.stream()
-                                    .filter(response -> response.getStatus() == 200 && response.getBody().length != 0)
+                                    .filter(response -> response.getStatus() == 200)
                                     .findFirst().orElseThrow());
                         }
                     }).exceptionally(exception -> {
