@@ -111,7 +111,7 @@ class TwoNodeTest extends ClusterTestBase {
             final byte[] value = randomValue();
 
             // Insert
-            assertEquals(201, upsert(0, key, value, 1, 2).getStatus());
+            assertEquals(201, upsert(0, key, value, 2, 3).getStatus());
 
             // Check
             final Response response = get(1, key, 2, 2);

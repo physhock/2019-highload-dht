@@ -43,6 +43,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+
 /**
  * Implementation of Service.
  */
@@ -151,7 +153,7 @@ public class ServiceImpl extends HttpServer implements Service {
 
     private HttpRequest convertRequest(final Request request, final String node) {
         return HttpRequest.newBuilder()
-                .timeout(Duration.ofMillis(2000))
+                .timeout(Duration.ofSeconds(2))
                 .header(PROXIED_REQUEST, "True")
                 .method(convertRequestMethod(request),
                         request.getBody() == null
@@ -313,17 +315,23 @@ public class ServiceImpl extends HttpServer implements Service {
                             final String replicas,
                             final Request request,
                             final HttpSession session) {
-            final List<CompletableFuture[]> combinedFutures =
+            final List<List<CompletableFuture<Response>>> combinedFutures =
                     combineFutures(sendRequest(Character.getNumericValue(replicas.charAt(2)), key, request),
                             Character.getNumericValue(replicas.charAt(0)));
 
             final CompletableFuture<List<Response>> futureResponseList =
                     CompletableFuture.anyOf(combinedFutures.stream()
-                            .map(CompletableFuture::allOf)
+                            .map(futures -> CompletableFuture.allOf(futures.toArray(
+                                    new CompletableFuture<?>[futures.size()])))
                             .toArray(CompletableFuture[]::new))
-                            .thenApply(future -> Arrays.stream(combinedFutures.stream()
-                                    .filter(array -> CompletableFuture.allOf(array).isDone())
-                                    .findFirst().orElseThrow()).map(this::getResponse).collect(Collectors.toList()));
+                            .thenApply(future -> combinedFutures.stream()
+                                    .filter(list -> CompletableFuture.allOf(list.toArray(
+                                            new CompletableFuture<?>[list.size()])).isDone())
+                                    .findFirst()
+                                    .orElseThrow()
+                                    .stream()
+                                    .map(this::getResponse)
+                                    .collect(Collectors.toList()));
 
             switch (request.getMethod()) {
                 case Request.METHOD_GET:
@@ -335,18 +343,16 @@ public class ServiceImpl extends HttpServer implements Service {
                                 .allMatch(response -> response.getStatus() == 404) ||
                                 responseList.stream()
                                         .anyMatch(response -> response.getBody().length != 0
-                                                && new String(response.getBody()).equals("Data is dead"))) {
+                                                && new String(response.getBody(), UTF_8).equals("Data is dead"))) {
                             sendResponse(session, () -> new Response(Response.NOT_FOUND, Response.EMPTY));
                         } else {
-                            sendResponse(session, () -> {
-
-                                final Response response1 = responseList.stream()
-                                        .filter(response -> response.getStatus() == 200)
-                                        .findFirst().get();
-
-                                return new Response(Response.OK, response1.getBody());
-                            });
+                            sendResponse(session, () -> responseList.stream()
+                                    .filter(response -> response.getStatus() == 200 && response.getBody().length != 0)
+                                    .findFirst().orElseThrow());
                         }
+                    }).exceptionally(exception -> {
+                        log.error("GET coordinator error: ", exception.getCause());
+                        return null;
                     });
                     break;
                 case Request.METHOD_PUT:
@@ -357,6 +363,9 @@ public class ServiceImpl extends HttpServer implements Service {
                         } else {
                             sendResponse(session, () -> NOT_ENOUGH_REPLICAS);
                         }
+                    }).exceptionally(exception -> {
+                        log.error("PUT coordinator error: ", exception.getCause());
+                        return null;
                     });
                     break;
                 case Request.METHOD_DELETE:
@@ -367,6 +376,9 @@ public class ServiceImpl extends HttpServer implements Service {
                         } else {
                             sendResponse(session, () -> NOT_ENOUGH_REPLICAS);
                         }
+                    }).exceptionally(exception -> {
+                        log.error("DELETE coordinator error: ", exception.getCause());
+                        return null;
                     });
                     break;
             }
@@ -381,26 +393,25 @@ public class ServiceImpl extends HttpServer implements Service {
             }
         }
 
-        private List<CompletableFuture[]> combineFutures(final List<CompletableFuture<Response>> futures,
-                                                         final int ack) {
-            List<CompletableFuture[]> combinations = new ArrayList<>();
-            helper(combinations, futures, new CompletableFuture[ack], 0, futures.size() - 1, 0);
+        private List<List<CompletableFuture<Response>>> combineFutures(final List<CompletableFuture<Response>> futures,
+                                                                       final int ack) {
+            List<List<CompletableFuture<Response>>> combinations = new ArrayList<>();
+            List<CompletableFuture<Response>> data = new ArrayList<>(ack);
+            helper(combinations, futures, data, 0, futures.size() - 1, 0, ack);
             return combinations;
         }
 
-        private void helper(final List<CompletableFuture[]> combinations,
+        private void helper(final List<List<CompletableFuture<Response>>> combinations,
                             final List<CompletableFuture<Response>> futures,
-                            final CompletableFuture[] data,
-                            final int start, final int end, final int index) {
-            if (index == data.length) {
-                CompletableFuture[] combination = data.clone();
-                combinations.add(combination);
+                            final List<CompletableFuture<Response>> data,
+                            final int start, final int end, final int index, final int ack) {
+            if (index == ack) {
+                combinations.add(new ArrayList<>(data.subList(0, ack)));
             } else if (start <= end) {
-                data[index] = futures.get(start);
-                helper(combinations, futures, data, start + 1, end, index + 1);
-                helper(combinations, futures, data, start + 1, end, index);
+                data.add(index, futures.get(start));
+                helper(combinations, futures, data, start + 1, end, index + 1, ack);
+                helper(combinations, futures, data, start + 1, end, index, ack);
             }
         }
-
     }
 }
