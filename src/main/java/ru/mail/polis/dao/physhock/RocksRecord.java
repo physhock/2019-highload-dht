@@ -17,7 +17,7 @@ public class RocksRecord {
         this.dead = dead;
     }
 
-    public static RocksRecord fromByteArray(final byte[] array){
+    public static RocksRecord fromByteArray(final byte[] array) {
         final ByteBuffer byteBuffer = ByteBuffer.wrap(array);
         return fromByteBuffer(byteBuffer);
     }
@@ -38,8 +38,9 @@ public class RocksRecord {
     }
 
     public ByteBuffer getData() {
-        if (isDead())
+        if (isDead()) {
             throw new NoSuchElementExceptionLite("Data is dead");
+        }
         return data;
     }
 
