@@ -19,6 +19,8 @@ import ru.mail.polis.dao.DAO;
 import ru.mail.polis.dao.physhock.ByteBufferUtils;
 import ru.mail.polis.dao.physhock.NoSuchElementExceptionLite;
 import ru.mail.polis.service.Service;
+import ru.mail.polis.service.physhock.util.Converter;
+import ru.mail.polis.service.physhock.util.FutureCombinator;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;

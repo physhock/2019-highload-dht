@@ -1,4 +1,4 @@
-package ru.mail.polis.service.physhock;
+package ru.mail.polis.service.physhock.util;
 
 import one.nio.http.Response;
 
@@ -7,14 +7,26 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 /**
+ * Utility class for making ack-element subset all nodes set.
+ *
  * @author fshkolni
  */
 public class FutureCombinator {
 
+    private FutureCombinator() {
+    }
+
+    /**
+     * Method takes set of all responses and make all possible combinations of them with defined size.
+     *
+     * @param futures set of all responses
+     * @param ack size of subset
+     * @return list of all possible ack-subsets
+     */
     public static List<List<CompletableFuture<Response>>> combineFutures(
             final List<CompletableFuture<Response>> futures, final int ack) {
-        List<List<CompletableFuture<Response>>> combinations = new ArrayList<>();
-        List<CompletableFuture<Response>> data = new ArrayList<>(ack);
+        final List<List<CompletableFuture<Response>>> combinations = new ArrayList<>();
+        final List<CompletableFuture<Response>> data = new ArrayList<>(ack);
         helper(combinations, futures, data, 0, futures.size() - 1, 0, ack);
         return combinations;
     }

@@ -1,4 +1,4 @@
-package ru.mail.polis.service.physhock;
+package ru.mail.polis.service.physhock.util;
 
 import one.nio.http.Request;
 import one.nio.http.Response;
@@ -12,14 +12,32 @@ import java.util.Arrays;
 import java.util.Objects;
 
 /**
+ * Utility class for converting one.nio.http to java.net.http.
+ *
  * @author fshkolni
  */
 public class Converter {
 
+    private Converter() {
+    }
+
+    /**
+     * Method converts java.net.http.HttpResponse to one.nio.http.Response.
+     *
+     * @param httpResponse response to convert
+     * @return converted response
+     */
     public static Response convertHttpResponse(final HttpResponse<byte[]> httpResponse) {
         return new Response(String.valueOf(httpResponse.statusCode()), httpResponse.body());
     }
 
+    /**
+     * Method converts one.nio.request to java.net.http.HttpRequest.
+     *
+     * @param request request to convert
+     * @param node    request destination
+     * @return converted request
+     */
     public static HttpRequest convertRequest(final Request request, final String node) {
         return HttpRequest.newBuilder()
                 .timeout(Duration.ofSeconds(2))
@@ -31,7 +49,7 @@ public class Converter {
                 .uri(URI.create(node + request.getURI())).build();
     }
 
-    private static String convertRequestMethod(Request request) {
+    private static String convertRequestMethod(final Request request) {
         final byte[] bytes = request.toBytes();
         final int bodyLength = request.getBody() == null ? 0 : request.getBody().length;
         final int length = Utf8.length(request.getURI()) + 13 + request.getHeaderCount() * 2 + bodyLength + 1;

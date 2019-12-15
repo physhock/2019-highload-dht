@@ -14,9 +14,14 @@ import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 /**
+ * Class for processing replicas requests.
+ *
  * @author fshkolni
  */
 class RequestCoordinator {
+
+    private RequestCoordinator() {
+    }
 
     public static Response processRequest(final List<List<CompletableFuture<Response>>> combinedRequests,
                                           final int requestMethod) {
