@@ -112,9 +112,12 @@ public class ServiceImpl extends HttpServer implements Service {
             if (" True".equals(request.getHeader(PROXIED_REQUEST + ":"))) {
                 sendResponse(session, () -> completeRequest(request, key));
             } else {
-                sendResponse(session, () -> RequestCoordinator.processRequest(
-                        FutureCombinator.combineFutures(
-                                sendRequest(params[1], key, request), params[0]), request.getMethod()));
+                sendResponse(session, () -> {
+                    final List<List<CompletableFuture<Response>>> combinedRequests = FutureCombinator.combineFutures(
+                            sendRequest(params[1], key, request), params[0]);
+                    return RequestCoordinator.processRequest(
+                            combinedRequests, request.getMethod());
+                });
             }
         }
     }
