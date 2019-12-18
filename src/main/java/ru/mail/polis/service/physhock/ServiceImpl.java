@@ -246,12 +246,11 @@ public class ServiceImpl extends HttpServer implements Service {
     }
 
     private CompletableFuture<Response> sendToNode(final String node, final Request request) {
-        final HttpRequest request1 = Converter.convertRequest(request, node);
-        return client.sendAsync(request1,
+        return client.sendAsync(Converter.convertRequest(request, node),
                 HttpResponse.BodyHandlers.ofByteArray())
                 .handle((response, exception) -> exception == null
                         ? Converter.convertHttpResponse(response)
-                        : new Response(Response.INTERNAL_ERROR + " " + topology.isMe(node), Response.EMPTY));
+                        : new Response(Response.INTERNAL_ERROR, Response.EMPTY));
     }
 
     @Override

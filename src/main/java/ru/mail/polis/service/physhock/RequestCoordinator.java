@@ -31,40 +31,41 @@ class RequestCoordinator {
                 .toArray(CompletableFuture[]::new))
                 .thenApply(future -> combinedRequests.stream()
                         .filter(list -> CompletableFuture.allOf(list.toArray(
-                                new CompletableFuture<?>[0])).isDone())
+                                new CompletableFuture<?>[0])).isDone() &&
+                                list.stream()
+                                        .map(RequestCoordinator::getResponse)
+                                        .noneMatch(response -> response.getStatus() == 500))
                         .findFirst()
                         .orElseThrow()
                         .stream()
                         .map(RequestCoordinator::getResponse)
                         .collect(Collectors.toList()))
-                .thenApply(responseList -> processResponses(requestMethod, responseList)));
+                .thenApply(responseList -> processResponses(requestMethod, responseList))
+                .handle((res, e) -> e == null
+                        ? res
+                        : new Response("504 Not Enough Replicas", Response.EMPTY)));
     }
 
     private static Response processResponses(final int requestMethod, final List<Response> responseList) {
-        if (responseList.stream()
-                .anyMatch(response -> response.getStatus() == 500)) {
-            return new Response("504 Not Enough Replicas", Response.EMPTY);
-        } else {
-            switch (requestMethod) {
-                case Request.METHOD_GET:
-                    if (responseList.stream().allMatch(response -> response.getStatus() == 404)
-                            || responseList.stream().anyMatch(response -> response.getBody().length != 0
-                            && new String(response.getBody(), StandardCharsets.UTF_8).equals("Data is dead"))) {
-                        return new Response(Response.NOT_FOUND, Response.EMPTY);
-                    } else {
-                        return responseList.stream()
-                                .filter(response -> response.getStatus() == 200)
-                                .max(Comparator.comparingLong(response ->
-                                        RocksRecord.fromByteArray(response.getBody()).getTimestamp()))
-                                .orElseThrow();
-                    }
-                case Request.METHOD_PUT:
-                    return new Response(Response.CREATED, Response.EMPTY);
-                case Request.METHOD_DELETE:
-                    return new Response(Response.ACCEPTED, Response.EMPTY);
-                default:
-                    return new Response(Response.BAD_REQUEST, Response.EMPTY);
-            }
+        switch (requestMethod) {
+            case Request.METHOD_GET:
+                if (responseList.stream().allMatch(response -> response.getStatus() == 404)
+                        || responseList.stream().anyMatch(response -> response.getBody().length != 0
+                        && new String(response.getBody(), StandardCharsets.UTF_8).equals("Data is dead"))) {
+                    return new Response(Response.NOT_FOUND, Response.EMPTY);
+                } else {
+                    return responseList.stream()
+                            .filter(response -> response.getStatus() == 200)
+                            .max(Comparator.comparingLong(response ->
+                                    RocksRecord.fromByteArray(response.getBody()).getTimestamp()))
+                            .orElseThrow();
+                }
+            case Request.METHOD_PUT:
+                return new Response(Response.CREATED, Response.EMPTY);
+            case Request.METHOD_DELETE:
+                return new Response(Response.ACCEPTED, Response.EMPTY);
+            default:
+                return new Response(Response.BAD_REQUEST, Response.EMPTY);
         }
     }
 
