@@ -1,14 +1,7 @@
 package ru.mail.polis.service.physhock;
 
 import com.google.common.base.Charsets;
-import one.nio.http.HttpServer;
-import one.nio.http.HttpServerConfig;
-import one.nio.http.HttpSession;
-import one.nio.http.Param;
-import one.nio.http.Path;
-import one.nio.http.Request;
-import one.nio.http.RequestMethod;
-import one.nio.http.Response;
+import one.nio.http.*;
 import one.nio.net.Socket;
 import one.nio.server.AcceptorConfig;
 import org.jetbrains.annotations.NotNull;
@@ -20,21 +13,20 @@ import ru.mail.polis.dao.physhock.ByteBufferUtils;
 import ru.mail.polis.dao.physhock.NoSuchElementExceptionLite;
 import ru.mail.polis.service.Service;
 import ru.mail.polis.service.physhock.util.Converter;
-import ru.mail.polis.service.physhock.util.FutureCombinator;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.lang.invoke.MethodHandles;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
+import java.util.Map;
 import java.util.concurrent.Executor;
+import java.util.stream.Collectors;
 
 /**
  * Implementation of Service.
@@ -47,7 +39,7 @@ public class ServiceImpl extends HttpServer implements Service {
     private final DAO dao;
     private final Executor executor;
     private final Topology<String> topology;
-    private final HttpClient client;
+    private final Map<String, HttpClient> nodes;
 
     /**
      * Server constructor.
@@ -59,14 +51,17 @@ public class ServiceImpl extends HttpServer implements Service {
      */
     public ServiceImpl(final int port, final DAO dao,
                        final Executor executor,
-                       final HttpClient client,
                        final Topology<String> topology
     ) throws IOException {
         super(getConfig(port), dao);
         this.dao = dao;
         this.executor = executor;
-        this.client = client;
         this.topology = topology;
+        this.nodes = topology
+                .all()
+                .stream()
+                .collect(Collectors.toMap(node -> node,
+                        node -> HttpClient.newHttpClient()));
     }
 
     @NotNull
@@ -112,12 +107,9 @@ public class ServiceImpl extends HttpServer implements Service {
             if (" True".equals(request.getHeader(PROXIED_REQUEST + ":"))) {
                 sendResponse(session, () -> completeRequest(request, key));
             } else {
-                sendResponse(session, () -> {
-                    final List<List<CompletableFuture<Response>>> combinedRequests = FutureCombinator.combineFutures(
-                            sendRequest(params[1], key, request), params[0]);
-                    return RequestCoordinator.processRequest(
-                            combinedRequests, request.getMethod());
-                });
+                sendResponse(session, () ->
+                        RequestCoordinator.processResponses(sendRequest(params[1], key, request),
+                                request.getMethod(), params[1] - params[0]));
             }
         }
     }
@@ -157,19 +149,22 @@ public class ServiceImpl extends HttpServer implements Service {
         });
     }
 
-    private List<CompletableFuture<Response>> sendRequest(final int from, final ByteBuffer key, final Request request) {
-        final List<CompletableFuture<Response>> responses = new ArrayList<>();
+    private List<Response> sendRequest(final int from, final ByteBuffer key, final Request request) {
+        final List<Response> responses = new ArrayList<>();
         for (int i = 0; i < from; i++) {
             final String node = topology.findNextNode(key, i);
             if (topology.isMe(node)) {
                 try {
-                    responses.add(CompletableFuture.completedFuture(completeRequest(request, key)));
+                    responses.add(completeRequest(request, key));
                 } catch (IOException e) {
-                    responses.add(CompletableFuture.completedFuture(
-                            new Response(Response.INTERNAL_ERROR, Response.EMPTY)));
+                    responses.add(new Response(Response.INTERNAL_ERROR, Response.EMPTY));
                 }
             } else {
-                responses.add(sendToNode(node, request));
+                try {
+                    responses.add(sendToNode(node, request));
+                } catch (IOException e) {
+                    responses.add(new Response(Response.INTERNAL_ERROR, Response.EMPTY));
+                }
             }
         }
         return responses;
@@ -245,13 +240,15 @@ public class ServiceImpl extends HttpServer implements Service {
         }
     }
 
-    private CompletableFuture<Response> sendToNode(final String node, final Request request) {
-        return client.sendAsync(Converter.convertRequest(request, node),
-                HttpResponse.BodyHandlers.ofByteArray())
-                .handle((response, exception) -> exception == null
-                        ? Converter.convertHttpResponse(response)
-                        : new Response(Response.INTERNAL_ERROR, Response.EMPTY));
+    private Response sendToNode(final String node, final Request request) throws IOException {
+        try {
+            return Converter.convertHttpResponse(nodes.get(node).send(Converter.convertRequest(request, node),
+                    HttpResponse.BodyHandlers.ofByteArray()));
+        } catch (InterruptedException | IOException e) {
+            throw new IOException("proxy troubles", e);
+        }
     }
+
 
     @Override
     public void handleDefault(final Request request, @NotNull final HttpSession session) throws IOException {
